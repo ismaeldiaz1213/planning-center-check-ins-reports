@@ -1,199 +1,372 @@
-# Check-ins Automated Reports for Google Drive
+# IBL Planning Center — Automated Roster & Check-In System
 
-This project automatically:
+This project does two things automatically:
 
--   Connects to **Planning Center Check-Ins**
--   Pulls attendance data for a specific event
--   Generates a **PDF roster per location**
--   Uploads (and overwrites) `Roster.pdf` files inside a **Google Shared
-    Drive**
+1. **Generates PDF rosters** from Planning Center check-ins and uploads them to Google Drive every Monday at 2 AM
+2. **Bulk checks in entire groups** to an event (optional, run manually)
 
-This is designed for churches using Planning Center who want automated
-Sunday School / class rosters stored in Google Drive.
+---
 
-------------------------------------------------------------------------
+## Project Structure
 
-# Overview
+```
+planning-center-check-ins-reports/
+├── main.py               # Roster generator (Rutas + Escuela Dominical)
+├── groups_to_check_ins.py # Optional: bulk check-in a group to an event
+├── ibl_logo.png          # Church logo used in PDFs
+├── credentials.json      # Google service account key (never commit this)
+├── .env                  # Local credentials (never commit this)
+├── .gitignore            # Excludes .env and credentials.json
+├── requirements.txt      # Python dependencies
+├── Dockerfile            # Container definition for Cloud Run
+├── entrypoint.sh         # Writes credentials at runtime, then runs main.py
+├── setup_gcloud.sh       # Run ONCE to deploy everything to Google Cloud
+└── manage.sh             # Day-to-day management (update keys, test, logs)
+```
 
-The script performs the following:
+---
 
-1.  Authenticates with Planning Center API
-2.  Finds a specific Check-Ins Event (e.g., `Escuela Dominical`)
-3.  Finds the most recent event period
-4.  Pulls check-ins for that event period
-5.  Groups check-ins by location
-6.  Fetches additional person details (birthdate, phone, email, address)
-7.  Generates a PDF roster per location
-8.  Uploads the roster to a Google Shared Drive folder
-9.  Overwrites the existing `Roster.pdf` each run
+## How It Works
 
-------------------------------------------------------------------------
+### Roster Generator (`main.py`)
 
-# Requirements
+Run with either of two event names as an argument:
 
--   Python 3.10+
--   Planning Center account with API access
--   Google Workspace account (Shared Drives required)
--   A Google Cloud project with Drive API enabled
+```bash
+python main.py "Rutas"
+python main.py "Escuela Dominical"
+```
 
-Install required Python packages:
+**`Rutas`** — generates one PDF per bus route. People are grouped by apartment complex, sorted by unit number within each group. Empty rows are included for walk-ins. Highlights missing birthdays, phones, and bad addresses in yellow.
 
-    pip install requests reportlab google-api-python-client google-auth python-dotenv
+**`Escuela Dominical`** — generates one simple alphabetical roster per Sunday school class location. Same yellow highlighting for missing data.
 
-------------------------------------------------------------------------
+Both PDFs include:
+- IBL Libertad logo
+- Route/class name as the title
+- Generated date and time (in Spanish)
+- Grade column (auto-filled from PCO; age-based for children under 5)
+- Marcos 16:15 verse in the footer
+- Page numbers
 
-# Environment Variables (.env)
+### Auto Check-In (`auto_checkin.py`)
 
-Create a `.env` file in the project root:
+Looks up all members of a PCO Group and bulk checks them into the most recent event period. Uses your browser session cookie to call the same internal endpoint the PCO web UI uses.
 
-    PCO_APP_ID=TODO_FILL_IN
-    PCO_SECRET=TODO_FILL_IN
-    PCO_EVENT_NAME=TODO_FILL_IN
-    GOOGLE_DRIVE_PARENT_FOLDER_ID=TODO_FILL_IN
+---
 
-------------------------------------------------------------------------
+## First-Time Setup
 
-# Step 1 --- Create Planning Center Personal Access Token
+### Prerequisites
 
-1.  Log into Planning Center.
-2.  Navigate to Developer → Personal Access Tokens.
-3.  Click **New Personal Access Token**
-4.  Enable:
-    -   ✔ Check-Ins
-    -   ✔ People
-5.  Copy the **Client ID** and **Secret**.
+| Tool | Install |
+|------|---------|
+| Python 3.10+ | Already on most systems; check with `python3 --version` |
+| Google Cloud CLI | See below |
+| Docker | `sudo dnf install docker` (Fedora) |
 
-Fill in your `.env`:
+#### Install Google Cloud CLI on Fedora
 
-    PCO_APP_ID=<Client ID>
-    PCO_SECRET=<Secret>
-    PCO_EVENT_NAME=<Exact Event Name>
+```bash
+sudo tee -a /etc/yum.repos.d/google-cloud-sdk.repo << EOM
+[google-cloud-cli]
+name=Google Cloud CLI
+baseurl=https://packages.cloud.google.com/yum/repos/cloud-sdk-el9-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOM
 
-------------------------------------------------------------------------
+sudo dnf install google-cloud-cli
+```
+I recognize most people do not use a Linux computer. Google has documentation for people though! Please see this link for specific instructions for your device: 
 
-# Step 2 --- Verify API Access
+#### Install and start Docker
 
-Test your credentials:
+```bash
+sudo dnf install docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+newgrp docker
+```
 
-    curl -u CLIENT_ID:SECRET https://api.planningcenteronline.com/check-ins/v2/events
+---
 
-You should receive HTTP 200 and JSON data.
+### Step 1 — Planning Center API Credentials
 
-------------------------------------------------------------------------
+1. Log into Planning Center
+2. Go to **https://api.planningcenteronline.com/oauth/applications**
+3. Click **New Personal Access Token**
+4. Enable **Check-Ins** and **People**
+5. Copy the **Application ID** and **Secret**
 
-# Step 3 --- Set Up Google Cloud Service Account
+Test that they work:
+```bash
+curl -u YOUR_APP_ID:YOUR_SECRET \
+  https://api.planningcenteronline.com/check-ins/v2/events
+```
+You should get JSON back with your events listed.
 
-## Create Google Cloud Project
+---
 
-1.  Visit https://console.cloud.google.com/
-2.  Create a new project.
+### Step 2 — Google Service Account
 
-## Enable Google Drive API
+The project already has a service account set up:
+`ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccount.com`
 
-1.  Go to APIs & Services → Library.
-2.  Enable **Google Drive API**.
+If you need to regenerate the key:
+1. Go to **https://console.cloud.google.com/iam-admin/serviceaccounts?project=ibl-planning-center-check-ins**
+2. Click the service account → **Keys** tab
+3. **Add Key → Create New Key → JSON**
+4. Download and rename it to `credentials.json`
+5. Place it in the project root folder
 
-## Create Service Account
+The service account must have **Editor** access to your Google Drive roster folder. Right-click the folder in Drive → **Share** → paste the service account email → set to **Editor**.
 
-1.  IAM & Admin → Service Accounts.
-2.  Click **Create Service Account**.
-3.  Complete setup.
+---
 
-## Create JSON Key
+### Step 3 — Google Drive Folder ID
 
-1.  Open the service account.
-2.  Go to **Keys**.
-3.  Add Key → Create New Key → JSON.
-4.  Download and rename to:
+1. Open your Google Drive roster folder in a browser
+2. The URL looks like: `https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXX`
+3. Copy the `XXXXXXXXXXXXXXXX` part — that is your folder ID
 
-credentials.json
+---
 
-Place it in the project root.
+### Step 4 — Local `.env` File (for running locally)
 
-------------------------------------------------------------------------
+Copy the example:
+```bash
+cp .env.example .env
+```
 
-# Step 4 --- Create Google Shared Drive
+Fill in your values:
+```
+PCO_APP_ID=your_app_id_here
+PCO_SECRET=your_secret_here
+GOOGLE_DRIVE_PARENT_FOLDER_ID=your_folder_id_here
+```
 
-⚠ Service accounts cannot upload to My Drive. You must use a Shared
-Drive.
+---
 
-1.  Create a Shared Drive (example: IBL-SS).
-2.  Add your service account as **Content Manager**.
+### Step 5 — Install Python Dependencies
 
-------------------------------------------------------------------------
+```bash
+pip install -r requirements.txt
+```
 
-# Step 5 --- Create Folder Structure
+---
 
-Inside the Shared Drive:
+### Step 6 — Test Locally
 
-IBL-SS\
-└── Escuela Dominical
+```bash
+python main.py "Rutas"
+```
 
-Do not create location folders manually --- the script will create them.
+You should see output like:
+```
+Finding event 'Rutas'...
+Event ID: 754993
+Finding recent event periods (last 5 weeks)...
+  Using 5 event period(s):
+    - 44164721 (2026-03-15T14:00:00Z)
+    ...
+Fetching check-ins...
+  [1] Fetching Isaac Ramirez (id: 149426747)...
+  [2] Cached: Regina Cruz
+  ...
+Generating PDF for Ruta 1 - Bus (42 attendees)...
+  ✓ Uploaded roster for Ruta 1 - Bus
+Done.
+```
 
-------------------------------------------------------------------------
+---
 
-# Step 6 --- Get Parent Folder ID
+### Step 7 — Deploy to Google Cloud (Automated Monday Runs)
 
-Open the Escuela Dominical folder.
+Run the setup script **once**:
 
-The URL will look like:
+```bash
+chmod +x setup_gcloud.sh
+./setup_gcloud.sh
+```
 
-https://drive.google.com/drive/folders/XXXXXXXXXXXX
+This will walk you through:
+- Logging into Google Cloud
+- Creating/selecting a project
+- Enabling required APIs
+- Storing all secrets securely in Secret Manager
+- Building and pushing the Docker image
+- Creating Cloud Run Jobs for Rutas and Escuela Dominical
+- Scheduling both to run every Monday at 2 AM US Central
 
-Copy the ID and place it in `.env`:
+> ⚠️ `credentials.json` is **never** uploaded to the cloud. It is stored as a Secret Manager secret and written to disk only at container runtime.
 
-GOOGLE_DRIVE_PARENT_FOLDER_ID=XXXXXXXXXXXX
+---
 
-------------------------------------------------------------------------
+## Day-to-Day Management
 
-# Step 7 --- Run the Script
+Use the management menu for everything after initial setup:
 
-python main.py
+```bash
+chmod +x manage.sh
+./manage.sh
+```
+
+```
+╔══════════════════════════════════════════════════════════╗
+║        Church Roster — Cloud Management Menu             ║
+╚══════════════════════════════════════════════════════════╝
+
+  SECRETS & CREDENTIALS
+  1) Update PCO App ID
+  2) Update PCO Secret
+  3) Update Google Drive Folder ID
+  4) Update credentials.json (service account key)
+  5) View current secret values
+
+  DEPLOYMENT
+  6) Deploy updated main.py to Cloud
+
+  TESTING & LOGS
+  7) Run Rutas job now (test)
+  8) Run Escuela Dominical job now (test)
+  9) View logs — Rutas
+  10) View logs — Escuela Dominical
+  11) View job status (last run results)
+
+  SCHEDULER
+  12) View scheduled jobs
+  13) Pause scheduled jobs (stop auto-run)
+  14) Resume scheduled jobs
+```
+
+---
+
+## Making Changes to the Script
+
+When you edit `main.py`, deploy the update in two steps:
+
+**Option A — Use the management menu:**
+```
+./manage.sh → option 6
+```
+
+**Option B — Run the command directly:**
+```bash
+gcloud builds submit \
+    --tag us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster:latest \
+    --project=ibl-planning-center-check-ins
+```
+
+The new code will be used on the next scheduled run. To test it immediately, use option 7 or 8 in `manage.sh`.
+
+---
+
+## Auto Group to Check-In Script (`groups_to_check_ins.py`)
+
+This script looks up all members of a Planning Center Group and checks them all into the most recent event period in one shot.
+
+### Configuration
+
+At the top of `auto_checkin.py`, set:
+
+```python
+EVENT_NAME    = "Escuela Dominical"   # The Check-Ins event name
+GROUP_NAME    = "11th and 12th Grade" # The PCO Group name
+LOCATION_NAME = "11th and 12th Grade" # The location within the event
+BATCH_SIZE    = 25                    # People per request (keep at 25)
+```
+
+### Browser Session Setup
+
+This script uses the PCO web interface internally (not the public API), so it needs your browser session cookie.
+
+**Getting your session cookie:**
+1. Open **https://check-ins.planningcenteronline.com** while logged in
+2. Open DevTools (`F12`) → **Application** tab → **Cookies** → `check-ins.planningcenteronline.com`
+3. Copy the value of `planning_center_session`
+
+**Getting your CSRF token:**
+1. In DevTools → **Console**, run:
+   ```javascript
+   document.querySelector('meta[name=csrf-token]').content
+   ```
+2. Copy the output
+
+Add both to your `.env`:
+```
+PCO_SESSION_COOKIE=your_session_cookie_value
+PCO_CSRF_TOKEN=your_csrf_token_value
+```
+
+> ⚠️ Session cookies expire when you log out or after a period of inactivity. If the script fails with a session error, grab a fresh cookie from your browser.
+
+### Running It
+
+```bash
+python auto_checkin.py
+```
 
 Expected output:
+```
+=======================================================
+  Auto Check-In: 11th and 12th Grade → Escuela Dominical
+=======================================================
+Looking up group: '11th and 12th Grade'...
+  Found group ID: 12345
+Fetching members of group 12345...
+  Found 18 members.
+Finding Check-Ins event: 'Escuela Dominical'...
+  Found event ID: 937274
+Finding last Sunday's event period...
+  Last Sunday: 2026-03-15
+  ✓ Matched event period: 44188503
+Building session from browser cookie...
+  ✓ Session valid
 
-Finding event... Event ID: XXXXX Finding latest event period... Event
-Period ID: XXXXX Fetching check-ins... Generating roster for Location
-1... Uploaded roster for Location 1 Done.
+Bulk checking in 18 members in batches of 25...
 
-------------------------------------------------------------------------
+  Sending batch 1 (18 people)...
+  ✓ 18 checked in, 0 duplicates skipped
 
-# Resulting Structure
+=======================================================
+  Done! 18 checked in, 0 duplicates, 0 errors.
+=======================================================
+```
 
-Shared Drive\
-└── Escuela Dominical\
-├── Location 1\
-│ └── Roster.pdf\
-├── Location 2\
-│ └── Roster.pdf
+---
 
-Each run overwrites Roster.pdf.
+## Troubleshooting
 
-------------------------------------------------------------------------
+| Problem | Fix |
+|---------|-----|
+| `429 Too Many Requests` | The script auto-retries with backoff. Wait for it. |
+| `SSL EOF / ReadTimeout` | Same — auto-retries up to 7 times. If it keeps failing, try again later. |
+| `Event 'X' not found` | Check the exact event name in Planning Center — it's case-sensitive. |
+| `credentials.json not found` | Make sure the file is in the project root for local runs. For cloud, use `manage.sh` option 4. |
+| Session cookie expired (`auto_checkin.py`) | Grab a fresh `planning_center_session` cookie from your browser. |
+| PDF only shows 1 person | You may be running an older version of `main.py`. Pull the latest. |
+| Build fails with `file not found` | Never put `credentials.json` in the Docker build — it's handled via Secret Manager. |
 
-# Security Notes
+---
 
--   Never commit `.env`
--   Never commit `credentials.json`
--   Revoke exposed tokens immediately
--   Store credentials securely
+## Security
 
-Add to `.gitignore`:
+- **Never commit** `.env` or `credentials.json` to git
+- Both are in `.gitignore` by default
+- In production, all secrets live in Google Secret Manager — not in the image or environment files
+- Rotate your PCO token at **https://api.planningcenteronline.com/oauth/applications** if it is ever exposed
+- Rotate your Google service account key in the Cloud Console if it is ever exposed
 
-.env\
-credentials.json
+---
 
-------------------------------------------------------------------------
+## Schedule Reference
 
-# Optional Automation
+| Job | Schedule | Time |
+|-----|----------|------|
+| Rutas | Every Monday | 2:00 AM US Central |
+| Escuela Dominical | Every Monday | 2:00 AM US Central |
 
-Cron Example:
-
-0 8 \* \* MON /usr/bin/python3 /path/to/main.py \>\> /path/to/log.txt
-2\>&1
-
-------------------------------------------------------------------------
-
-If this works --- congratulations.\
-You now have an automated reporting system for your ministry.
+The scheduler runs at `0 8 * * 1` UTC (= 2 AM CST / 3 AM CDT). If the PDFs are showing the wrong week's data, it may be a daylight saving time offset — adjust the scheduler hour in the Cloud Console or via `manage.sh` option 12.
