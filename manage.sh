@@ -2,7 +2,7 @@
 # =============================================================================
 # manage.sh
 # Day-to-day management of the church roster Cloud Run deployment.
-# Run this any time after the initial setup_gcloud.sh has been completed.
+# Run this any time after setup_gcloud.sh has been completed.
 #
 # Usage:
 #   chmod +x manage.sh
@@ -14,7 +14,8 @@ set -e
 PROJECT_ID="ibl-planning-center-check-ins"
 REGION="us-central1"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster:latest"
-SA_EMAIL="991091227497-compute@developer.gserviceaccount.com"
+SA_EMAIL="ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccount.com"
+SECRET_ENV="PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 BOLD='\033[1m'
@@ -29,7 +30,6 @@ info()    { echo -e "${CYAN}ℹ  ${NC}$1"; }
 success() { echo -e "${GREEN}✓  ${NC}$1"; }
 warn()    { echo -e "${YELLOW}⚠  ${NC}$1"; }
 error()   { echo -e "${RED}✗  ${NC}$1"; }
-header()  { echo -e "\n${BOLD}── $1 ──────────────────────────────────────────────${NC}"; }
 
 # ── Main menu ─────────────────────────────────────────────────────────────────
 show_menu() {
@@ -39,14 +39,14 @@ show_menu() {
     echo -e "${BOLD}║        Church Roster — Cloud Management Menu             ║${NC}"
     echo -e "${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  ${BOLD}SECRETS & CREDENTIALS${NC}"
+    echo -e "  ${BOLD}SECRETS${NC}"
     echo -e "  ${CYAN}1)${NC} Update PCO App ID"
     echo -e "  ${CYAN}2)${NC} Update PCO Secret"
     echo -e "  ${CYAN}3)${NC} Update Google Drive Folder ID"
-    echo -e "  ${CYAN}4)${NC} Update credentials.json (service account key)"
-    echo -e "  ${CYAN}5)${NC} View current secret values"
+    echo -e "  ${CYAN}4)${NC} View current secret values"
     echo ""
     echo -e "  ${BOLD}DEPLOYMENT${NC}"
+    echo -e "  ${CYAN}5)${NC} Update credentials.json (rebuild + redeploy jobs)"
     echo -e "  ${CYAN}6)${NC} Deploy updated main.py to Cloud"
     echo ""
     echo -e "  ${BOLD}TESTING & LOGS${NC}"
@@ -72,7 +72,8 @@ update_secret() {
     local prompt_text=$2
     local is_password=${3:-false}
 
-    header "Update $secret_name"
+    echo ""
+    echo -e "${BOLD}── Update $secret_name ─────────────────────────────────────${NC}"
     echo ""
 
     if [[ "$is_password" == "true" ]]; then
@@ -91,33 +92,12 @@ update_secret() {
         --data-file=- \
         --project="$PROJECT_ID"
 
-    success "$secret_name updated successfully."
-    echo ""
-    info "The new value will be used on the next job run automatically."
-}
-
-update_credentials_file() {
-    header "Update credentials.json"
-    echo ""
-    info "Enter the path to your new credentials.json file."
-    read -rp "  Path (default: ./credentials.json): " CREDS_PATH
-    CREDS_PATH="${CREDS_PATH:-./credentials.json}"
-
-    if [[ ! -f "$CREDS_PATH" ]]; then
-        error "File not found: $CREDS_PATH"
-        return
-    fi
-
-    gcloud secrets versions add "GOOGLE_CREDENTIALS" \
-        --data-file="$CREDS_PATH" \
-        --project="$PROJECT_ID"
-
-    success "credentials.json updated in Secret Manager."
-    info "The new credentials will be used on the next job run automatically."
+    success "$secret_name updated. Will take effect on next job run."
 }
 
 view_secrets() {
-    header "Current Secret Values"
+    echo ""
+    echo -e "${BOLD}── Current Secret Values ───────────────────────────────────${NC}"
     echo ""
     warn "Showing secret values — don't share your screen if others are around."
     echo ""
@@ -131,28 +111,46 @@ view_secrets() {
             --project="$PROJECT_ID" 2>/dev/null || echo "(not set)")
         echo -e "  ${BOLD}$secret${NC}: $VALUE"
     done
-
-    # Show credentials.json summary without dumping the whole thing
-    echo ""
-    CREDS=$(gcloud secrets versions access latest \
-        --secret="GOOGLE_CREDENTIALS" \
-        --project="$PROJECT_ID" 2>/dev/null || echo "")
-    if [[ -n "$CREDS" ]]; then
-        CLIENT_EMAIL=$(echo "$CREDS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('client_email','(unknown)'))" 2>/dev/null || echo "(parse error)")
-        echo -e "  ${BOLD}GOOGLE_CREDENTIALS${NC}: ✓ set (service account: $CLIENT_EMAIL)"
-    else
-        echo -e "  ${BOLD}GOOGLE_CREDENTIALS${NC}: (not set)"
-    fi
 }
 
 # ── Deployment ────────────────────────────────────────────────────────────────
+update_credentials() {
+    echo ""
+    echo -e "${BOLD}── Update credentials.json ─────────────────────────────────${NC}"
+    echo ""
+    info "This will rebuild the Docker image with the new credentials.json"
+    info "and recreate both Cloud Run jobs."
+    echo ""
+    read -rp "  Path to new credentials.json (default: ./credentials.json): " CREDS_PATH
+    CREDS_PATH="${CREDS_PATH:-./credentials.json}"
+
+    if [[ ! -f "$CREDS_PATH" ]]; then
+        error "File not found: $CREDS_PATH"
+        return
+    fi
+
+    # Copy to project root if it's not already there
+    if [[ "$CREDS_PATH" != "./credentials.json" ]]; then
+        cp "$CREDS_PATH" ./credentials.json
+        success "Copied to ./credentials.json"
+    fi
+
+    info "Rebuilding image..."
+    gcloud builds submit \
+        --tag "$IMAGE" \
+        --project="$PROJECT_ID"
+
+    success "Image rebuilt with new credentials."
+    _recreate_jobs
+}
+
 deploy_script() {
-    header "Deploy Updated main.py"
+    echo ""
+    echo -e "${BOLD}── Deploy Updated main.py ───────────────────────────────────${NC}"
     echo ""
 
     if [[ ! -f "main.py" ]]; then
-        error "main.py not found in current directory."
-        info "Make sure you're running this from your project folder."
+        error "main.py not found. Run this from your project folder."
         return
     fi
 
@@ -164,53 +162,73 @@ deploy_script() {
         --tag "$IMAGE" \
         --project="$PROJECT_ID"
 
-    success "Image deployed successfully!"
+    success "Image deployed."
     echo ""
-    info "Both Cloud Run jobs will use the new code on their next run."
+    info "Updating jobs to use new image..."
+
+    gcloud run jobs update roster-rutas \
+        --image="$IMAGE" \
+        --region="$REGION" \
+        --project="$PROJECT_ID"
+
+    gcloud run jobs update roster-escuela-dominical \
+        --image="$IMAGE" \
+        --region="$REGION" \
+        --project="$PROJECT_ID"
+
+    success "Both jobs updated to latest image."
     echo ""
-    read -rp "  Would you like to test it now? (y/N): " RUN_NOW
+    read -rp "  Would you like to test Rutas now? (y/N): " RUN_NOW
     if [[ "$RUN_NOW" =~ ^[Yy]$ ]]; then
-        run_job "roster-rutas" "Rutas"
+        _execute_job "roster-rutas" "Rutas"
     fi
 }
 
+_recreate_jobs() {
+    echo ""
+    info "Recreating Cloud Run jobs..."
+
+    for job_name in roster-rutas roster-escuela-dominical; do
+        local event_arg
+        [[ "$job_name" == "roster-rutas" ]] && event_arg="Rutas" || event_arg="Escuela Dominical"
+
+        if gcloud run jobs describe "$job_name" \
+                --region="$REGION" --project="$PROJECT_ID" &>/dev/null; then
+            gcloud run jobs delete "$job_name" \
+                --region="$REGION" \
+                --project="$PROJECT_ID" \
+                --quiet
+        fi
+
+        gcloud run jobs create "$job_name" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --service-account="$SA_EMAIL" \
+            --set-secrets="$SECRET_ENV" \
+            --args="$event_arg" \
+            --task-timeout=3600
+
+        success "Job recreated: $job_name"
+    done
+}
+
 # ── Job runners ───────────────────────────────────────────────────────────────
-run_job() {
+_execute_job() {
     local job_name=$1
     local display_name=$2
 
-    header "Running $display_name job"
     echo ""
-    info "Starting job — this will run the full script against live data."
-    warn "This will generate and upload real PDFs to Google Drive."
-    echo ""
-    read -rp "  Confirm run? (y/N): " CONFIRM
+    warn "This will run the full script against live data and upload real PDFs."
+    read -rp "  Confirm? (y/N): " CONFIRM
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; return; }
 
     echo ""
-    info "Executing job..."
-    EXECUTION=$(gcloud run jobs execute "$job_name" \
+    gcloud run jobs execute "$job_name" \
         --region="$REGION" \
-        --project="$PROJECT_ID" \
-        --format="value(metadata.name)" 2>/dev/null)
+        --project="$PROJECT_ID"
 
-    success "Job started: $EXECUTION"
-    echo ""
-    info "Streaming logs (Ctrl+C to stop following, job will keep running)..."
-    echo ""
-
-    sleep 3  # Give it a moment to start
-
-    gcloud logging read \
-        "resource.type=cloud_run_job AND resource.labels.job_name=$job_name" \
-        --project="$PROJECT_ID" \
-        --limit=50 \
-        --format="value(textPayload)" \
-        --freshness=5m \
-        2>/dev/null || warn "Could not stream logs. Check Cloud Console for output."
-
-    echo ""
-    info "To see full logs, select 'View logs' from the main menu."
+    success "Job started. Watch logs with option 9 or 10."
 }
 
 # ── Log viewers ───────────────────────────────────────────────────────────────
@@ -218,11 +236,12 @@ view_logs() {
     local job_name=$1
     local display_name=$2
 
-    header "Logs — $display_name"
     echo ""
-    echo -e "  ${DIM}1) Last run only${NC}"
+    echo -e "${BOLD}── Logs — $display_name ────────────────────────────────────${NC}"
+    echo ""
+    echo -e "  ${DIM}1) Last run${NC}"
     echo -e "  ${DIM}2) Last 3 runs${NC}"
-    echo -e "  ${DIM}3) Open in browser (Cloud Console)${NC}"
+    echo -e "  ${DIM}3) Open in browser${NC}"
     echo ""
     read -rp "  Choose: " LOG_CHOICE
 
@@ -234,8 +253,7 @@ view_logs() {
                 --project="$PROJECT_ID" \
                 --limit=200 \
                 --format="table(timestamp,textPayload)" \
-                --freshness=2d \
-                2>/dev/null | head -100 || warn "No logs found."
+                --freshness=2d 2>/dev/null | head -100 || warn "No logs found."
             ;;
         2)
             echo ""
@@ -244,13 +262,11 @@ view_logs() {
                 --project="$PROJECT_ID" \
                 --limit=500 \
                 --format="table(timestamp,textPayload)" \
-                --freshness=14d \
-                2>/dev/null | head -300 || warn "No logs found."
+                --freshness=14d 2>/dev/null | head -300 || warn "No logs found."
             ;;
         3)
             URL="https://console.cloud.google.com/run/jobs/details/$REGION/$job_name/logs?project=$PROJECT_ID"
-            info "Opening: $URL"
-            xdg-open "$URL" 2>/dev/null || echo "  Visit: $URL"
+            xdg-open "$URL" 2>/dev/null || echo -e "  Visit: ${CYAN}$URL${NC}"
             ;;
         *)
             warn "Invalid choice."
@@ -258,11 +274,10 @@ view_logs() {
     esac
 }
 
-# ── Job status ────────────────────────────────────────────────────────────────
 view_job_status() {
-    header "Job Status"
     echo ""
-
+    echo -e "${BOLD}── Job Status ───────────────────────────────────────────────${NC}"
+    echo ""
     for job in roster-rutas roster-escuela-dominical; do
         echo -e "  ${BOLD}$job${NC}"
         gcloud run jobs describe "$job" \
@@ -272,14 +287,13 @@ view_job_status() {
             2>/dev/null || echo "    (not found)"
         echo ""
     done
-
-    info "Full job history:"
-    echo -e "  ${CYAN}https://console.cloud.google.com/run/jobs?project=$PROJECT_ID${NC}"
+    echo -e "  Full history: ${CYAN}https://console.cloud.google.com/run/jobs?project=$PROJECT_ID${NC}"
 }
 
 # ── Scheduler controls ────────────────────────────────────────────────────────
 view_scheduler() {
-    header "Scheduled Jobs"
+    echo ""
+    echo -e "${BOLD}── Scheduled Jobs ───────────────────────────────────────────${NC}"
     echo ""
     gcloud scheduler jobs list \
         --location="$REGION" \
@@ -289,9 +303,8 @@ view_scheduler() {
 }
 
 pause_scheduler() {
-    header "Pause Scheduled Jobs"
     echo ""
-    warn "This will stop the jobs from running automatically on Mondays."
+    warn "This stops the jobs from running automatically on Mondays."
     read -rp "  Confirm pause? (y/N): " CONFIRM
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; return; }
 
@@ -304,9 +317,8 @@ pause_scheduler() {
 }
 
 resume_scheduler() {
-    header "Resume Scheduled Jobs"
     echo ""
-    info "This will re-enable automatic Monday runs."
+    info "This re-enables automatic Monday runs."
     read -rp "  Confirm resume? (y/N): " CONFIRM
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; return; }
 
@@ -319,7 +331,6 @@ resume_scheduler() {
 }
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
-# Verify gcloud is available
 command -v gcloud &>/dev/null || {
     echo "gcloud not found. Install from https://cloud.google.com/sdk/docs/install"
     exit 1
@@ -333,11 +344,11 @@ while true; do
         1)  update_secret "PCO_APP_ID" "PCO App ID" ;;
         2)  update_secret "PCO_SECRET" "PCO Secret" true ;;
         3)  update_secret "GOOGLE_DRIVE_PARENT_FOLDER_ID" "Google Drive Folder ID" ;;
-        4)  update_credentials_file ;;
-        5)  view_secrets ;;
+        4)  view_secrets ;;
+        5)  update_credentials ;;
         6)  deploy_script ;;
-        7)  run_job "roster-rutas" "Rutas" ;;
-        8)  run_job "roster-escuela-dominical" "Escuela Dominical" ;;
+        7)  _execute_job "roster-rutas" "Rutas" ;;
+        8)  _execute_job "roster-escuela-dominical" "Escuela Dominical" ;;
         9)  view_logs "roster-rutas" "Rutas" ;;
         10) view_logs "roster-escuela-dominical" "Escuela Dominical" ;;
         11) view_job_status ;;
