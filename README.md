@@ -1,9 +1,18 @@
-# IBL Planning Center — Automated Roster & Check-In System
+# IBL Planning Center — Automated Roster System
 
-This project does two things automatically:
+Automatically generates PDF rosters from Planning Center check-ins and uploads them to Google Drive every Monday at 2 AM. Built for **Iglesia Bautista Libertad** in Houston, TX.
 
-1. **Generates PDF rosters** from Planning Center check-ins and uploads them to Google Drive every Monday at 2 AM
-2. **Bulk checks in entire groups** to an event (optional, run manually)
+---
+
+## Features
+
+- 📋 **Two roster types per bus route** — an address-grouped PDF for bus secretaries and a clean alphabetical roster for drivers
+- 🏫 **Sunday school rosters** — one per class, alphabetical with grade and attendance info
+- 🟡 **Yellow highlights** for missing data (phone, birthday, address, grade) so staff know what needs updating
+- 🟠 **Visitor dot** — gold circle marks people added to PCO within the last 7 days
+- 📊 **Attendance rate** — shows how many of the last N weeks each person attended (e.g. `3/5`)
+- 🎨 **Campaign themes** — seasonal colour schemes for special events
+- ☁️ **Fully automated** via Google Cloud Run + Cloud Scheduler
 
 ---
 
@@ -11,9 +20,10 @@ This project does two things automatically:
 
 ```
 planning-center-check-ins-reports/
-├── main.py                  # Roster generator (Rutas + Escuela Dominical)
-├── auto_checkin.py          # Optional: bulk check-in a group to an event
-├── ibl_logo.png             # Church logo used in PDFs
+├── main.py                  # Core script — generates and uploads all PDFs
+├── preview.py               # Local preview tool — generates PDFs with mock data
+├── auto_checkin.py          # Optional: bulk check-in a PCO group to an event
+├── ibl_logo.png             # Church logo used in all PDFs
 ├── credentials.json         # Google service account key (never commit this)
 ├── .env                     # Local credentials (never commit this)
 ├── .env.example             # Template — copy to .env and fill in
@@ -22,37 +32,90 @@ planning-center-check-ins-reports/
 ├── requirements.txt         # Python dependencies
 ├── Dockerfile               # Container definition for Cloud Run
 ├── setup_gcloud.sh          # Run ONCE to deploy everything to Google Cloud
-└── manage.sh                # Day-to-day management (update keys, test, logs)
+└── manage.sh                # Day-to-day management (deploy, theme, logs, test)
 ```
 
 ---
 
-## How It Works
+## PDF Output
 
-### Roster Generator (`main.py`)
+### Rutas (Bus Routes)
 
-Run with an event name as the argument:
+Each bus route folder in Google Drive receives two PDFs every Monday:
+
+| File | Description |
+|------|-------------|
+| `Direcciones-Roster.pdf` | People grouped by apartment complex, sorted by unit number. Includes empty writable rows for walk-ins, address prefilled. |
+| `Roster.pdf` | Clean alphabetical list sorted by last name. Good for drivers. |
+
+### Escuela Dominical (Sunday School)
+
+Each class location receives:
+
+| File | Description |
+|------|-------------|
+| `Roster.pdf` | Alphabetical roster with grade, attendance rate, and visitor indicators. |
+
+### Column Reference
+
+| Column | Notes |
+|--------|-------|
+| ● (dot) | Gold = new to PCO this week (visitor) |
+| Nombre / Apellido | First and last name |
+| Cumpleaños | Birthday in MM/DD/YYYY format |
+| Teléfono | Primary phone number |
+| Grado | PCO grade field; auto-filled as Nursery / 3 años / 4 años for children under 5 |
+| Apto. | Apartment number extracted from address |
+| Asist. | Attendance rate over the selected window (e.g. `4/5`) |
+| Dirección | Street address without apartment number |
+
+**Yellow highlighting** means the cell is missing or incomplete — phone, birthday, grade (for minors), and bad/city-only addresses all trigger this.
+
+---
+
+## Campaign Themes
+
+Pass `--theme` to apply a seasonal colour scheme. The campaign name appears centered in the header. Yellow warning highlights and the gold visitor dot are always preserved regardless of theme.
 
 ```bash
-python main.py "Rutas"
-python main.py "Escuela Dominical"
+python main.py "Rutas" --theme primavera
+python main.py "Rutas" --theme verano
+python main.py "Rutas" --theme otono
+python main.py "Rutas" --theme invierno
 ```
 
-**`Rutas`** generates one PDF per bus route. People are grouped by apartment complex and sorted by unit number within each group. Empty rows are included for walk-ins. Missing birthdays, phones, and bad addresses are highlighted yellow.
+| Theme | Colours | Label |
+|-------|---------|-------|
+| *(none)* | IBL navy/blue (default) | — |
+| `primavera` | Greens | 🌿 Campaña de Primavera |
+| `verano` | Orange/red | ☀️ Campaña de Verano |
+| `otono` | Brown/tan | 🍂 Campaña de Otoño |
+| `invierno` | Deep indigo/blue | ❄️ Campaña de Invierno |
 
-**`Escuela Dominical`** generates one simple alphabetical roster per Sunday school class location with the same yellow highlighting for missing data.
+---
 
-Both PDFs include:
-- IBL Libertad logo
-- Route/class name as the title
-- Generated date and time in Spanish
-- Grade column (auto-filled from PCO; age-based for children under 5)
-- Marcos 16:15 verse in the footer
-- Page numbers
+## Local Development & Preview
 
-### Auto Check-In (`auto_checkin.py`)
+Use `preview.py` to generate sample PDFs without any credentials or live data. All mock data uses Chick-fil-A locations near the church so it is safe to commit publicly.
 
-Looks up all members of a PCO Group and bulk checks them into the most recent event period. Uses your browser session cookie to call the same internal endpoint the PCO web UI uses.
+```bash
+# Generate all themes × both PDF types (10 files total)
+python preview.py
+
+# One specific theme
+python preview.py --theme primavera
+
+# Only the simple roster, all themes
+python preview.py --type roster
+
+# Only the address-grouped PDF for one theme
+python preview.py --type direcciones --theme otono
+
+# Generate and open immediately in your PDF viewer
+python preview.py --open
+```
+
+Output goes to `previews/` in your project folder. Edit `MOCK_ATTENDEES` at the top of `preview.py` to test edge cases like missing fields, toddlers, or visitors.
 
 ---
 
@@ -65,8 +128,7 @@ Looks up all members of a PCO Group and bulk checks them into the most recent ev
 | Python 3.10+ | `python3 --version` to check |
 | Google Cloud CLI | See below |
 
-#### Install Google Cloud CLI on Fedora
-
+**Install Google Cloud CLI on Fedora:**
 ```bash
 sudo tee -a /etc/yum.repos.d/google-cloud-sdk.repo << EOM
 [google-cloud-cli]
@@ -81,15 +143,12 @@ EOM
 sudo dnf install google-cloud-cli
 ```
 
----
-
 ### Step 1 — Planning Center API Credentials
 
-1. Log into Planning Center
-2. Go to **https://api.planningcenteronline.com/oauth/applications**
-3. Click **New Personal Access Token**
-4. Enable **Check-Ins** and **People**
-5. Copy the **Application ID** and **Secret**
+1. Go to **https://api.planningcenteronline.com/oauth/applications**
+2. Click **New Personal Access Token**
+3. Enable **Check-Ins** and **People**
+4. Copy the **Application ID** and **Secret**
 
 Test that they work:
 ```bash
@@ -97,106 +156,64 @@ curl -u YOUR_APP_ID:YOUR_SECRET \
   https://api.planningcenteronline.com/check-ins/v2/events
 ```
 
-You should see JSON with your events listed.
-
----
-
 ### Step 2 — Google Service Account
 
 The project uses:
 `ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccount.com`
 
-If you need to generate a new key:
-1. Go to **https://console.cloud.google.com/iam-admin/serviceaccounts?project=ibl-planning-center-check-ins**
-2. Click the service account → **Keys** tab
-3. **Add Key → Create New Key → JSON**
-4. Download and rename it to `credentials.json`
-5. Place it in the project root
+To generate a new key:
+1. Go to **Cloud Console → IAM → Service Accounts**
+2. Click the account → **Keys** tab → **Add Key → JSON**
+3. Download, rename to `credentials.json`, place in project root
 
-The service account must have **Editor** access to your Google Drive roster folder. Right-click the folder in Drive → **Share** → paste the service account email → set to **Editor**.
+The service account needs **Editor** access to your Google Drive roster folder. Right-click the folder → **Share** → paste the email → set to **Editor**.
 
----
-
-### Step 3 — Google Drive Folder ID
-
-1. Open your Google Drive roster folder in a browser
-2. The URL looks like: `https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXX`
-3. The `XXXXXXXXXXXXXXXX` part is your folder ID
-
----
-
-### Step 4 — Local `.env` File (for running locally)
+### Step 3 — Local `.env` File
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in your values:
+Fill in:
 ```
 PCO_APP_ID=your_app_id_here
 PCO_SECRET=your_secret_here
-GOOGLE_DRIVE_PARENT_FOLDER_ID=your_folder_id_here
+GOOGLE_DRIVE_PARENT_FOLDER_ID=your_drive_folder_id_here
 ```
 
----
+The folder ID is the last part of the URL when you open the folder in Drive:
+`https://drive.google.com/drive/folders/THIS_PART`
 
-### Step 5 — Install Python Dependencies
+### Step 4 — Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
-
-### Step 6 — Test Locally
+### Step 5 — Test Locally
 
 ```bash
 python main.py "Rutas"
+python main.py "Escuela Dominical"
 ```
 
-Expected output:
-```
-Finding event 'Rutas'...
-Event ID: 754993
-Finding recent event periods (last 5 weeks)...
-  [1] Fetching Isaac Ramirez (id: 149426747)...
-  ...
-Generating PDF for Ruta 1 - Bus (42 attendees)...
-  ✓ Uploaded roster for Ruta 1 - Bus
-Done.
-```
+### Step 6 — Deploy to Google Cloud
 
----
-
-### Step 7 — Deploy to Google Cloud (Automated Monday Runs)
-
-Run the setup script **once**:
-
+Run once:
 ```bash
 chmod +x setup_gcloud.sh
 ./setup_gcloud.sh
 ```
 
-This walks you through every step interactively:
-- Logs into Google Cloud
-- Creates/selects your project
-- Enables required APIs
-- Stores PCO credentials in Secret Manager
-- Creates a `.gcloudignore` so `credentials.json` is included in builds
-- Builds and pushes the Docker image
-- Creates Cloud Run Jobs for Rutas and Escuela Dominical (using `ministry-account-pc`)
-- Schedules both to run every Monday at 2 AM US Central
+The script walks through everything interactively — project setup, API enablement, secret storage, Docker build, job creation, and scheduling.
 
-> ⚠️ `credentials.json` is baked into the Docker image at build time. The `.gcloudignore` file ensures gcloud includes it even though `.gitignore` excludes it from git. Never commit `credentials.json` to git.
+> ⚠️ `credentials.json` is baked into the Docker image at build time. The `.gcloudignore` file ensures gcloud includes it even though `.gitignore` excludes it from git. **Never commit `credentials.json`.**
 
 ---
 
 ## Day-to-Day Management
 
-Use the management menu for everything after initial setup:
-
 ```bash
-chmod +x manage.sh
 ./manage.sh
 ```
 
@@ -206,117 +223,105 @@ chmod +x manage.sh
 ╚══════════════════════════════════════════════════════════╝
 
   SECRETS
-  1) Update PCO App ID
-  2) Update PCO Secret
-  3) Update Google Drive Folder ID
-  4) View current secret values
+  1)  Update PCO App ID
+  2)  Update PCO Secret
+  3)  Update Google Drive Folder ID
+  4)  View current secret values
 
   DEPLOYMENT
-  5) Update credentials.json (rebuild + redeploy jobs)
-  6) Deploy updated main.py to Cloud
+  5)  Update credentials.json (rebuild + redeploy)
+  6)  Deploy updated main.py to Cloud
+  7)  Change campaign theme
 
   TESTING & LOGS
-  7) Run Rutas job now (test)
-  8) Run Escuela Dominical job now (test)
-  9) View logs — Rutas
-  10) View logs — Escuela Dominical
-  11) View job status (last run results)
+  8)  Run Rutas job now (test)
+  9)  Run Escuela Dominical job now (test)
+  10) View logs — Rutas
+  11) View logs — Escuela Dominical
+  12) View job status (last run results)
 
   SCHEDULER
-  12) View scheduled jobs
-  13) Pause scheduled jobs (stop auto-run)
-  14) Resume scheduled jobs
+  13) View scheduled jobs
+  14) Pause scheduled jobs
+  15) Resume scheduled jobs
 ```
 
 ---
 
-## Making Changes to the Script
+## Deploying Code Changes
 
-When you edit `main.py`, deploy the update:
+When you edit `main.py`, deploy with:
 
-**Option A — Management menu (recommended):**
-```
-./manage.sh → option 6
-```
-
-**Option B — Manual commands:**
 ```bash
-# 1. Rebuild the image
+# Option A — management menu
+./manage.sh → option 6
+
+# Option B — manual
 gcloud builds submit \
     --tag us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster:latest \
     --project=ibl-planning-center-check-ins
 
-# 2. Update both jobs to use the new image
 gcloud run jobs update roster-rutas \
     --image=us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster:latest \
-    --region=us-central1 \
-    --project=ibl-planning-center-check-ins
+    --region=us-central1 --project=ibl-planning-center-check-ins
 
 gcloud run jobs update roster-escuela-dominical \
     --image=us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster:latest \
-    --region=us-central1 \
-    --project=ibl-planning-center-check-ins
+    --region=us-central1 --project=ibl-planning-center-check-ins
 ```
 
-> ⚠️ You must run **both** the build and the job update. Building alone does not update the running jobs — they cache the image until explicitly told to refresh.
+> You must run **both** the build and the job update. Building alone does not update the running jobs.
 
 ---
 
-## Updating credentials.json
+## Changing the Campaign Theme
 
-If your service account key expires or is rotated:
+Via `manage.sh` → option 7 — pick from the menu, no rebuild needed.
 
-1. Download the new key from Cloud Console → rename to `credentials.json` → place in project folder
-2. Run `./manage.sh` → option 5
+Or manually:
+```bash
+gcloud run jobs update roster-rutas \
+    --args="Rutas,--theme primavera" \
+    --region=us-central1 --project=ibl-planning-center-check-ins
+```
 
-This rebuilds the image with the new credentials and recreates both jobs cleanly.
+To revert to default:
+```bash
+gcloud run jobs update roster-rutas \
+    --args="Rutas" \
+    --region=us-central1 --project=ibl-planning-center-check-ins
+```
 
 ---
 
-## Auto Check-In Script (`auto_checkin.py`)
+## Auto Check-In (`auto_checkin.py`)
 
-Looks up all members of a PCO Group and checks them all in at once.
+Bulk checks in all members of a PCO Group to the most recent event period.
 
-### Configuration
-
-At the top of `auto_checkin.py`:
-
+**Configure at the top of the file:**
 ```python
-EVENT_NAME    = "Escuela Dominical"   # The Check-Ins event name
-GROUP_NAME    = "11th and 12th Grade" # The PCO Group name
-LOCATION_NAME = "11th and 12th Grade" # The location within the event
-BATCH_SIZE    = 25                    # People per request (keep at 25)
+EVENT_NAME    = "Escuela Dominical"
+GROUP_NAME    = "11th and 12th Grade"
+LOCATION_NAME = "11th and 12th Grade"
+BATCH_SIZE    = 25
 ```
 
-### Browser Session Setup
-
-This script uses the PCO web interface internally so it needs your browser session cookie.
-
-**Getting your session cookie:**
+**Get your browser session cookie:**
 1. Open **https://check-ins.planningcenteronline.com** while logged in
-2. Open DevTools (`F12`) → **Application** tab → **Cookies** → `check-ins.planningcenteronline.com`
-3. Copy the value of `planning_center_session`
+2. DevTools (`F12`) → **Application** → **Cookies** → copy `planning_center_session`
+3. In DevTools Console run: `document.querySelector('meta[name=csrf-token]').content`
 
-**Getting your CSRF token:**
-1. In DevTools → **Console**, run:
-   ```javascript
-   document.querySelector('meta[name=csrf-token]').content
-   ```
-2. Copy the output
-
-Add both to your `.env`:
+Add to `.env`:
 ```
-PCO_SESSION_COOKIE=your_session_cookie_value
-PCO_CSRF_TOKEN=your_csrf_token_value
+PCO_SESSION_COOKIE=your_value
+PCO_CSRF_TOKEN=your_value
 ```
-
-> ⚠️ Session cookies expire when you log out. If the script fails with a session error, grab a fresh cookie from your browser.
-
-### Running It
 
 ```bash
 python auto_checkin.py
 ```
+
+> Session cookies expire on logout. Grab a fresh one if the script fails with a session error.
 
 ---
 
@@ -324,33 +329,32 @@ python auto_checkin.py
 
 | Problem | Fix |
 |---------|-----|
-| `429 Too Many Requests` | Script auto-retries with backoff. Wait for it. |
+| `429 Too Many Requests` | Script auto-retries with exponential backoff. Wait for it. |
 | `SSL EOF / ReadTimeout` | Auto-retries up to 7 times. If persistent, try again later. |
-| `Event 'X' not found` | Event name is case-sensitive — check exact name in Planning Center. |
-| `No such file or directory: main.py` | Job is using an old cached image. Run `manage.sh → option 6` to rebuild and update. |
-| `credentials.json not found` locally | Make sure the file is in the project root. |
-| `credentials.json` excluded from build | Make sure `.gcloudignore` exists and only contains `.env`. |
-| Job timed out after 10 minutes | Task timeout was too short. Both jobs are set to 3600s (1 hour) which is sufficient. |
-| PDFs not appearing in Drive | Check that `ministry-account-pc` has Editor access to the Drive folder. |
-| Session cookie expired (`auto_checkin.py`) | Grab a fresh `planning_center_session` cookie from your browser. |
+| `Event 'X' not found` | Event name is case-sensitive — check exact name in PCO. |
+| `No such file: main.py` in Cloud | Job is using a stale image. Run `manage.sh → option 6`. |
+| PDFs not appearing in Drive | Confirm `ministry-account-pc` has Editor access to the Drive folder. |
+| Job timed out | Both jobs are set to 3600s (1 hour). Should be sufficient for any church size. |
+| Session cookie expired | Grab fresh `planning_center_session` from your browser. |
+| Theme not applying | Remember to run both build + job update, or use `manage.sh → option 6` which does both. |
 
 ---
 
 ## Security
 
-- **Never commit** `.env` or `credentials.json` to git — both are in `.gitignore`
-- `credentials.json` is baked into the Docker image at build time, which stays private in your Artifact Registry
-- PCO credentials live in Google Secret Manager and are never in the image
-- Rotate your PCO token at **https://api.planningcenteronline.com/oauth/applications** if ever exposed
-- Rotate your Google service account key in Cloud Console → IAM → Service Accounts if ever exposed
+- **Never commit** `.env` or `credentials.json` — both are in `.gitignore`
+- `credentials.json` lives in the Docker image which is private to your Artifact Registry
+- PCO credentials live in Google Secret Manager — never in the image
+- Rotate your PCO token at **https://api.planningcenteronline.com/oauth/applications** if exposed
+- Rotate your service account key in Cloud Console → IAM → Service Accounts if exposed
 
 ---
 
-## Schedule Reference
+## Schedule
 
-| Job | Schedule | Time |
-|-----|----------|------|
-| Rutas | Every Monday | 2:00 AM US Central |
-| Escuela Dominical | Every Monday | 2:00 AM US Central |
+| Job | Cron | Time |
+|-----|------|------|
+| Rutas | `0 8 * * 1` | Monday 2:00 AM CST (8:00 AM UTC) |
+| Escuela Dominical | `0 8 * * 1` | Monday 2:00 AM CST (8:00 AM UTC) |
 
-The scheduler runs at `0 8 * * 1` UTC. During daylight saving time (CDT, March–November) this is 3 AM Central instead of 2 AM. To keep it at 2 AM year-round, update the schedule to `0 7 * * 1` in Cloud Scheduler during summer months via `manage.sh → option 12`.
+During CDT (March–November) this runs at 3 AM instead. Adjust to `0 7 * * 1` in Cloud Scheduler during summer if needed.

@@ -48,18 +48,19 @@ show_menu() {
     echo -e "  ${BOLD}DEPLOYMENT${NC}"
     echo -e "  ${CYAN}5)${NC} Update credentials.json (rebuild + redeploy jobs)"
     echo -e "  ${CYAN}6)${NC} Deploy updated main.py to Cloud"
+    echo -e "  ${CYAN}7)${NC} Change campaign theme"
     echo ""
     echo -e "  ${BOLD}TESTING & LOGS${NC}"
-    echo -e "  ${CYAN}7)${NC} Run Rutas job now (test)"
-    echo -e "  ${CYAN}8)${NC} Run Escuela Dominical job now (test)"
-    echo -e "  ${CYAN}9)${NC} View logs — Rutas"
-    echo -e "  ${CYAN}10)${NC} View logs — Escuela Dominical"
-    echo -e "  ${CYAN}11)${NC} View job status (last run results)"
+    echo -e "  ${CYAN}8)${NC} Run Rutas job now (test)"
+    echo -e "  ${CYAN}9)${NC} Run Escuela Dominical job now (test)"
+    echo -e "  ${CYAN}10)${NC} View logs — Rutas"
+    echo -e "  ${CYAN}11)${NC} View logs — Escuela Dominical"
+    echo -e "  ${CYAN}12)${NC} View job status (last run results)"
     echo ""
     echo -e "  ${BOLD}SCHEDULER${NC}"
-    echo -e "  ${CYAN}12)${NC} View scheduled jobs"
-    echo -e "  ${CYAN}13)${NC} Pause scheduled jobs (stop auto-run)"
-    echo -e "  ${CYAN}14)${NC} Resume scheduled jobs"
+    echo -e "  ${CYAN}13)${NC} View scheduled jobs"
+    echo -e "  ${CYAN}14)${NC} Pause scheduled jobs (stop auto-run)"
+    echo -e "  ${CYAN}15)${NC} Resume scheduled jobs"
     echo ""
     echo -e "  ${DIM}q)  Quit${NC}"
     echo ""
@@ -331,6 +332,53 @@ resume_scheduler() {
 }
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
+
+change_theme() {
+    echo ""
+    echo -e "${BOLD}── Change Campaign Theme ────────────────────────────────────${NC}"
+    echo ""
+    echo -e "  ${DIM}1) Default — azul IBL (sin campaña)${NC}"
+    echo -e "  ${DIM}2) 🌿 Campaña de Primavera${NC}"
+    echo -e "  ${DIM}3) ☀️  Campaña de Verano${NC}"
+    echo -e "  ${DIM}4) 🍂 Campaña de Otoño${NC}"
+    echo -e "  ${DIM}5) ❄️  Campaña de Invierno${NC}"
+    echo ""
+    read -rp "  Choose: " THEME_CHOICE
+
+    case $THEME_CHOICE in
+        1) THEME_FLAG="" ;                   THEME_LABEL="Default (azul IBL)" ;;
+        2) THEME_FLAG="--theme primavera";   THEME_LABEL="Campaña de Primavera" ;;
+        3) THEME_FLAG="--theme verano";      THEME_LABEL="Campaña de Verano" ;;
+        4) THEME_FLAG="--theme otono";       THEME_LABEL="Campaña de Otoño" ;;
+        5) THEME_FLAG="--theme invierno";    THEME_LABEL="Campaña de Invierno" ;;
+        *) warn "Invalid choice."; return ;;
+    esac
+
+    echo ""
+    info "Updating both jobs to: $THEME_LABEL"
+
+    for job_name in roster-rutas roster-escuela-dominical; do
+        local event_arg
+        [[ "$job_name" == "roster-rutas" ]] && event_arg="Rutas" || event_arg="Escuela Dominical"
+
+        if [[ -n "$THEME_FLAG" ]]; then
+            gcloud run jobs update "$job_name" \
+                --args="$event_arg,$THEME_FLAG" \
+                --region="$REGION" \
+                --project="$PROJECT_ID"
+        else
+            gcloud run jobs update "$job_name" \
+                --args="$event_arg" \
+                --region="$REGION" \
+                --project="$PROJECT_ID"
+        fi
+        success "Updated: $job_name → $THEME_LABEL"
+    done
+
+    echo ""
+    info "Theme will apply on the next run. To test now, use option 8 or 9."
+}
+
 command -v gcloud &>/dev/null || {
     echo "gcloud not found. Install from https://cloud.google.com/sdk/docs/install"
     exit 1
@@ -347,16 +395,17 @@ while true; do
         4)  view_secrets ;;
         5)  update_credentials ;;
         6)  deploy_script ;;
-        7)  _execute_job "roster-rutas" "Rutas" ;;
-        8)  _execute_job "roster-escuela-dominical" "Escuela Dominical" ;;
-        9)  view_logs "roster-rutas" "Rutas" ;;
-        10) view_logs "roster-escuela-dominical" "Escuela Dominical" ;;
-        11) view_job_status ;;
-        12) view_scheduler ;;
-        13) pause_scheduler ;;
-        14) resume_scheduler ;;
+        7)  change_theme ;;
+        8)  _execute_job "roster-rutas" "Rutas" ;;
+        9)  _execute_job "roster-escuela-dominical" "Escuela Dominical" ;;
+        10) view_logs "roster-rutas" "Rutas" ;;
+        11) view_logs "roster-escuela-dominical" "Escuela Dominical" ;;
+        12) view_job_status ;;
+        13) view_scheduler ;;
+        14) pause_scheduler ;;
+        15) resume_scheduler ;;
         q|Q) echo ""; info "Goodbye!"; echo ""; exit 0 ;;
-        *)  warn "Invalid option — please choose 1-14 or q." ;;
+        *)  warn "Invalid option — please choose 1-15 or q." ;;
     esac
 
     echo ""

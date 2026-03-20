@@ -5,17 +5,14 @@ import argparse
 import requests
 from requests.auth import HTTPBasicAuth
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Cache so each unique person_id is only fetched once
 _person_cache = {}
 
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib import colors
-from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas as rl_canvas
-from reportlab.platypus import Table, TableStyle
-from reportlab.lib.utils import ImageReader
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -23,51 +20,117 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-PCO_APP_ID = os.getenv("PCO_APP_ID")
-PCO_SECRET = os.getenv("PCO_SECRET")
+PCO_APP_ID                    = os.getenv("PCO_APP_ID")
+PCO_SECRET                    = os.getenv("PCO_SECRET")
 GOOGLE_DRIVE_PARENT_FOLDER_ID = os.getenv("GOOGLE_DRIVE_PARENT_FOLDER_ID")
 
 BASE_URL = "https://api.planningcenteronline.com"
-auth = HTTPBasicAuth(PCO_APP_ID, PCO_SECRET)
+auth     = HTTPBasicAuth(PCO_APP_ID, PCO_SECRET)
 
-# ── Layout constants ─────────────────────────────────────────────────────────
-PAGE_W, PAGE_H = landscape(letter)   # 792 x 612 pts (landscape)
-MARGIN        = 36
-USABLE_W      = PAGE_W - 2 * MARGIN   # 720 pts
-LOGO_PATH     = os.path.join(os.path.abspath(os.path.dirname(__file__)), "ibl_logo.png")
+# ── Layout constants ──────────────────────────────────────────────────────────
+PAGE_W, PAGE_H = landscape(letter)       # 792 x 612 pts
+MARGIN         = 36
+USABLE_W       = PAGE_W - 2 * MARGIN     # 720 pts
+LOGO_PATH      = os.path.join(os.path.abspath(os.path.dirname(__file__)), "ibl_logo.png")
 
-HEADER_H      = 46               # tighter header
-ADDR_BAR_H    = 20
-COL_HDR_H     = 18
-ROW_H         = 18
+HEADER_H       = 46
+ADDR_BAR_H     = 20
+COL_HDR_H      = 18
+ROW_H          = 18
 MIN_EMPTY_ROWS = 5
-FOOTER_H      = 24
+FOOTER_H       = 24
 
-# Columns: Nombre, Apellido, Cumpleaños, Teléfono, Grado, Apto., Dirección  → must sum to 720
-COL_WIDTHS   = [105, 105, 68, 100, 44, 48, 250]
-HEADERS_ES   = ["Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Dirección"]
+# Address-grouped PDF columns (sum = 720)
+# Star | Nombre | Apellido | Cumpleaños | Teléfono | Grado | Apto. | Asistencia | Dirección
+COL_WIDTHS = [16, 95, 95, 65, 90, 44, 44, 36, 235]
+HEADERS_ES = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Asist.", "Dirección"]
 
-def _rows_available(is_first_page):
-    """How many data rows fit in the content area of a page."""
-    if is_first_page:
-        content_h = PAGE_H - 2*MARGIN - HEADER_H - ADDR_BAR_H - COL_HDR_H - FOOTER_H
-    else:
-        content_h = PAGE_H - 2*MARGIN - ADDR_BAR_H - COL_HDR_H - FOOTER_H
-    return int(content_h / ROW_H)
+# Simple roster PDF columns (sum = 720)
+SR_COL_WIDTHS = [16, 100, 100, 65, 95, 44, 44, 36, 220]
+SR_HEADERS    = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Asist.", "Dirección"]
 
-# Colours
-NAVY          = colors.HexColor("#0D1F5C")
-BLUE_MID      = colors.HexColor("#1a4b9c")
-BLUE_LIGHT    = colors.HexColor("#4A90D9")
-BLUE_PALE     = colors.HexColor("#EEF4FB")
-BLUE_ADDR_BAR = colors.HexColor("#2255aa")
-WHITE         = colors.white
-GREY_LINE     = colors.HexColor("#CCCCCC")
-GREEN_TEXT    = colors.HexColor("#1a7a1a")
-ORANGE_TEXT   = colors.HexColor("#b85c00")
+# ── Colour palettes ───────────────────────────────────────────────────────────
+WHITE      = colors.white
+GREY_LINE  = colors.HexColor("#CCCCCC")
+YELLOW_WARN = colors.HexColor("#FFF176")   # always yellow — never themed
+GOLD_STAR   = colors.HexColor("#F5A623")   # visitor dot — always gold
+
+THEMES = {
+    # Default IBL blue
+    None: {
+        "title":      colors.HexColor("#0D1F5C"),
+        "subtitle":   colors.HexColor("#1a4b9c"),
+        "col_header": colors.HexColor("#4A90D9"),
+        "row_alt":    colors.HexColor("#EEF4FB"),
+        "addr_bar":   colors.HexColor("#2255aa"),
+        "rule":       colors.HexColor("#4A90D9"),
+        "footer_text":colors.HexColor("#0D1F5C"),
+        "campaign":   None,
+        "emoji":      "",
+    },
+    "primavera": {
+        "title":      colors.HexColor("#1B5E20"),
+        "subtitle":   colors.HexColor("#388E3C"),
+        "col_header": colors.HexColor("#43A047"),
+        "row_alt":    colors.HexColor("#E8F5E9"),
+        "addr_bar":   colors.HexColor("#2E7D32"),
+        "rule":       colors.HexColor("#81C784"),
+        "footer_text":colors.HexColor("#1B5E20"),
+        "campaign":   "Campaña de Primavera",
+        "emoji":      "🌿",
+    },
+    "verano": {
+        "title":      colors.HexColor("#BF360C"),
+        "subtitle":   colors.HexColor("#E64A19"),
+        "col_header": colors.HexColor("#FF7043"),
+        "row_alt":    colors.HexColor("#FBE9E7"),
+        "addr_bar":   colors.HexColor("#D84315"),
+        "rule":       colors.HexColor("#FFAB91"),
+        "footer_text":colors.HexColor("#BF360C"),
+        "campaign":   "Campaña de Verano",
+        "emoji":      "☀️",
+    },
+    "otono": {
+        "title":      colors.HexColor("#4E342E"),
+        "subtitle":   colors.HexColor("#6D4C41"),
+        "col_header": colors.HexColor("#8D6E63"),
+        "row_alt":    colors.HexColor("#EFEBE9"),
+        "addr_bar":   colors.HexColor("#5D4037"),
+        "rule":       colors.HexColor("#BCAAA4"),
+        "footer_text":colors.HexColor("#4E342E"),
+        "campaign":   "Campaña de Otoño",
+        "emoji":      "🍂",
+    },
+    "invierno": {
+        "title":      colors.HexColor("#1A237E"),
+        "subtitle":   colors.HexColor("#3949AB"),
+        "col_header": colors.HexColor("#5C6BC0"),
+        "row_alt":    colors.HexColor("#E8EAF6"),
+        "addr_bar":   colors.HexColor("#283593"),
+        "rule":       colors.HexColor("#9FA8DA"),
+        "footer_text":colors.HexColor("#1A237E"),
+        "campaign":   "Campaña de Invierno",
+        "emoji":      "❄️",
+    },
+}
+
+# Active theme — set in main() from --theme arg
+_theme = THEMES[None]
+
+def T(key):
+    """Shorthand to get a colour from the active theme."""
+    return _theme[key]
+
+VERSE_TEXT = "\"Id por todo el mundo y predicad el evangelio a toda criatura\""
+VERSE_REF  = "Marcos 16:15 — RV1960"
+
+MESES_ES = {
+    1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio",
+    7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"
+}
 
 
-# ── Planning Center helpers ──────────────────────────────────────────────────
+# ── Planning Center helpers ───────────────────────────────────────────────────
 
 def get_event_id(event_name):
     url = f"{BASE_URL}/check-ins/v2/events"
@@ -80,7 +143,7 @@ def get_event_id(event_name):
 
 
 def get_recent_event_periods(event_id, weeks=5):
-    url = f"{BASE_URL}/check-ins/v2/events/{event_id}/event_periods"
+    url    = f"{BASE_URL}/check-ins/v2/events/{event_id}/event_periods"
     params = {"order": "-created_at", "per_page": weeks}
     response = requests.get(url, auth=auth, params=params)
     response.raise_for_status()
@@ -97,17 +160,17 @@ def get_checkins_for_event_periods(event_id, event_period_ids):
     all_checkins, all_included = [], []
     valid_period_ids = set(event_period_ids)
     print(f"  Fetching all check-ins for event {event_id}...", flush=True)
-    url = f"{BASE_URL}/check-ins/v2/check_ins"
+    url    = f"{BASE_URL}/check-ins/v2/check_ins"
     params = {"where[event_id]": event_id, "include": "locations,person", "per_page": 100}
-    page = 1
+    page   = 1
     while url:
         print(f"    Page {page}...", flush=True)
         response = requests.get(url, auth=auth, params=params)
         print(f"    Status: {response.status_code}", flush=True)
         response.raise_for_status()
-        body = response.json()
+        body  = response.json()
         batch = body["data"]
-        kept = 0
+        kept  = 0
         for checkin in batch:
             ep_id = checkin.get("relationships", {}).get("event_period", {}).get("data", {}).get("id")
             if ep_id in valid_period_ids:
@@ -118,9 +181,9 @@ def get_checkins_for_event_periods(event_id, event_period_ids):
         next_url = body.get("links", {}).get("next")
         if next_url == url:
             break
-        url = next_url
+        url    = next_url
         params = {}
-        page += 1
+        page  += 1
     print(f"  Total matching check-ins: {len(all_checkins)}", flush=True)
     return all_checkins, all_included
 
@@ -128,10 +191,12 @@ def get_checkins_for_event_periods(event_id, event_period_ids):
 def get_person_details(person_id):
     if person_id in _person_cache:
         return _person_cache[person_id]
-    url = f"{BASE_URL}/people/v2/people/{person_id}"
+
+    url    = f"{BASE_URL}/people/v2/people/{person_id}"
     params = {"include": "emails,phone_numbers,addresses"}
     max_retries = 7
-    response = None
+    response    = None
+
     for attempt in range(max_retries):
         try:
             response = requests.get(url, auth=auth, params=params, timeout=60)
@@ -141,7 +206,7 @@ def get_person_details(person_id):
                 requests.exceptions.ConnectionError) as e:
             err_type = type(e).__name__
             wait = 2 ** attempt
-            print(f"  {err_type} — connection issue. Waiting {wait}s before retry ({attempt+1}/{max_retries})...", flush=True)
+            print(f"  {err_type} — waiting {wait}s before retry ({attempt+1}/{max_retries})...", flush=True)
             for remaining in range(wait, 0, -1):
                 print(f"  Retrying in {remaining}s...  ", end="\r", flush=True)
                 time.sleep(1)
@@ -165,12 +230,11 @@ def get_person_details(person_id):
         _person_cache[person_id] = {}
         return {}
 
-    body = response.json()
+    body         = response.json()
     person_attrs = body["data"]["attributes"]
-    included = body.get("included", [])
+    included     = body.get("included", [])
 
-    emails  = [i for i in included if i["type"] == "Email"]
-    phones  = [i for i in included if i["type"] == "PhoneNumber"]
+    phones    = [i for i in included if i["type"] == "PhoneNumber"]
     addresses = [i for i in included if i["type"] == "Address"]
 
     primary_phone = next(
@@ -180,8 +244,8 @@ def get_person_details(person_id):
 
     primary_address = ""
     if addresses:
-        addr = next((a for a in addresses if a["attributes"].get("primary")), addresses[0])
-        a = addr["attributes"]
+        addr  = next((a for a in addresses if a["attributes"].get("primary")), addresses[0])
+        a     = addr["attributes"]
         parts = filter(None, [
             a.get("street_line_1"), a.get("street_line_2"),
             a.get("city"), a.get("state"), a.get("zip"),
@@ -190,51 +254,40 @@ def get_person_details(person_id):
 
     GRADE_MAP = {
         -2: "Nursery", -1: "Pre-K", 0: "Kinder",
-        1: "1°", 2: "2°", 3: "3°", 4: "4°", 5: "5°", 6: "6°",
-        7: "7°", 8: "8°", 9: "9°", 10: "10°", 11: "11°", 12: "12°",
+        1: "1°",  2: "2°",  3: "3°",  4: "4°",  5: "5°",  6: "6°",
+        7: "7°",  8: "8°",  9: "9°", 10: "10°", 11: "11°", 12: "12°",
     }
     grade_raw = person_attrs.get("grade")
-    grade = GRADE_MAP.get(grade_raw, "") if grade_raw is not None else ""
+    grade     = GRADE_MAP.get(grade_raw, "") if grade_raw is not None else ""
 
     result = {
-        "phone":   primary_phone,
-        "address": primary_address,
-        "birthday": person_attrs.get("birthdate") or "",
-        "grade": grade,
+        "phone":      primary_phone,
+        "address":    primary_address,
+        "birthday":   person_attrs.get("birthdate") or "",
+        "grade":      grade,
+        "created_at": person_attrs.get("created_at") or "",
     }
     _person_cache[person_id] = result
     return result
 
 
-# ── PDF Generation ───────────────────────────────────────────────────────────
-
-VERSE_TEXT  = "\"Id por todo el mundo y predicad el evangelio a toda criatura\""
-VERSE_REF   = "Marcos 16:15 — RV1960"
-YELLOW_WARN = colors.HexColor("#FFF176")
-
-MESES_ES = {
-    1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio",
-    7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"
-}
+# ── Data helpers ──────────────────────────────────────────────────────────────
 
 def _fecha_es(dt=None):
-    """Return 'Generado el DD de mes de YYYY a las HH:MM' fully in Spanish."""
     dt = dt or datetime.now()
     return (f"Generado el {dt.day} de {MESES_ES[dt.month]} de {dt.year} "
             f"a las {dt.strftime('%H:%M')}")
 
+
 def _fmt_birthday(raw):
-    """Convert 'YYYY-MM-DD' → 'MM/DD/YYYY'. Passes through anything else."""
     if not raw:
         return ""
     import re
     m = re.match(r'(\d{4})-(\d{2})-(\d{2})', raw.strip())
-    if m:
-        return f"{m.group(2)}/{m.group(3)}/{m.group(1)}"
-    return raw
+    return f"{m.group(2)}/{m.group(3)}/{m.group(1)}" if m else raw
+
 
 def _age_from_birthday(birthday_raw):
-    """Return integer age, or None if birthday is missing/unparseable."""
     if not birthday_raw:
         return None
     import re
@@ -243,70 +296,48 @@ def _age_from_birthday(birthday_raw):
     if not m:
         return None
     try:
-        dob = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        dob   = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         today = date.today()
         return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
     except ValueError:
         return None
 
+
 def _is_minor(birthday_raw):
     age = _age_from_birthday(birthday_raw)
     return age is not None and age < 18
 
+
 def _resolve_grade(pco_grade, birthday_raw):
-    """
-    Return the display grade string, using age for children 4 and under
-    since PCO often doesn't set the grade field for toddlers/preschoolers.
-    Age 0-2  → 'Nursery'
-    Age 3    → '3 años'
-    Age 4    → '4 años'
-    Age 5+   → use PCO grade field (Pre-K, Kinder, 1°…12°)
-    """
     age = _age_from_birthday(birthday_raw)
-
-    # Age-based override for young children
     if age is not None:
-        if age <= 2:
-            return "Nursery"
-        if age == 3:
-            return "3 años"
-        if age == 4:
-            return "4 años"
-
-    # Fall back to PCO grade field for older kids
+        if age <= 2: return "Nursery"
+        if age == 3: return "3 años"
+        if age == 4: return "4 años"
     return pco_grade or ""
 
+
 def _is_bad_address(addr):
-    """True if address is blank or only city-level (e.g. 'Houston, TX')."""
     if not addr or not addr.strip():
         return True
     import re
-    stripped = addr.strip().lower()
-    if re.fullmatch(r'[\w\s]+,?\s*tx[\s,]*\d*', stripped):
+    if re.fullmatch(r'[\w\s]+,?\s*tx[\s,]*\d*', addr.strip().lower()):
         return True
     return False
 
+
 def _extract_apt(address):
-    """
-    Pull the apartment/unit identifier out of an address string.
-    Handles: '506', '#10B', 'APT 13A', 'Apto#20A', 'Apto. 202', bare comma-number, etc.
-    Returns the display string (e.g. '10B', '13A', '506') or ''.
-    """
     import re
     if not address:
         return ""
-    # Explicit keyword patterns: APT, Apt., Apto, Apto., #
     m = re.search(r'(?:apto?\.?\s*#?\s*|#\s*)(\d+\w*)', address, re.IGNORECASE)
     if m:
         return m.group(1)
-    # Bare number between commas: "... Rd, 506, Houston ..."
     m2 = re.search(r',\s*(\d+[A-Za-z]?)\s*,', address)
-    if m2:
-        return m2.group(1)
-    return ""
+    return m2.group(1) if m2 else ""
+
 
 def _parse_apt_number(address):
-    """Sortable tuple (int, str) for the apt number."""
     import re
     token = _extract_apt(address)
     if token:
@@ -314,8 +345,8 @@ def _parse_apt_number(address):
         return (int(digits.group(1)) if digits else 9999, token)
     return (9999, "")
 
+
 def _complex_key(address):
-    """Street/complex portion stripped of apt number, lowercased."""
     import re
     if not address:
         return ""
@@ -324,119 +355,14 @@ def _complex_key(address):
     parts = [p.strip() for p in cleaned.split(',')]
     return parts[0].lower() if parts else address.lower()
 
+
 def _street_only(address):
-    """Remove the apt portion for display in the address column."""
     import re
     if not address:
         return ""
-    # Remove ', 506,' or ', APT 13A,' style segments
     cleaned = re.sub(r',\s*(?:apto?\.?\s*#?\s*|#\s*)?\d+\w*(?=\s*,)', '',
                      address, flags=re.IGNORECASE)
     return cleaned.strip().strip(',').strip()
-
-
-def _draw_page_header(c, route_name, subtitle, gen_dt):
-    """Draw logo + titles. route_name is big; subtitle ('Ministerio de Autobuses') is small."""
-    top = PAGE_H - MARGIN
-
-    logo_h = 22
-    logo_w = logo_h * (300 / 58)
-    if os.path.exists(LOGO_PATH):
-        c.drawImage(LOGO_PATH, MARGIN, top - logo_h, width=logo_w, height=logo_h, mask='auto')
-        title_x = MARGIN + logo_w + 12
-    else:
-        title_x = MARGIN
-
-    # Route name — prominent
-    c.setFont("Helvetica-Bold", 14)
-    c.setFillColor(NAVY)
-    c.drawString(title_x, top - 15, route_name)
-
-    # "Ministerio de Autobuses" — smaller, below
-    c.setFont("Helvetica", 8)
-    c.setFillColor(BLUE_MID)
-    c.drawString(title_x, top - 26, subtitle)
-
-    # Generated date top-right, fully in Spanish with time
-    c.setFont("Helvetica", 7)
-    c.setFillColor(colors.HexColor("#888888"))
-    c.drawRightString(PAGE_W - MARGIN, top - 10, _fecha_es(gen_dt))
-
-    rule_y = top - HEADER_H + 4
-    c.setStrokeColor(BLUE_LIGHT)
-    c.setLineWidth(1.5)
-    c.line(MARGIN, rule_y, PAGE_W - MARGIN, rule_y)
-    return rule_y - 4
-
-
-def _draw_page_footer(c, page_num):
-    c.setFont("Helvetica-Oblique", 7)
-    c.setFillColor(NAVY)
-    c.drawString(MARGIN, MARGIN - 14, VERSE_TEXT)
-    c.setFont("Helvetica-Bold", 7)
-    c.drawString(MARGIN, MARGIN - 23, VERSE_REF)
-    c.setFont("Helvetica", 7)
-    c.setFillColor(colors.HexColor("#888888"))
-    c.drawRightString(PAGE_W - MARGIN, MARGIN - 18, f"Página {page_num}")
-    c.setStrokeColor(BLUE_LIGHT)
-    c.setLineWidth(0.8)
-    c.line(MARGIN, MARGIN - 4, PAGE_W - MARGIN, MARGIN - 4)
-
-
-def _draw_address_bar(c, display_addr, y):
-    c.setFillColor(BLUE_ADDR_BAR)
-    c.roundRect(MARGIN, y - ADDR_BAR_H, USABLE_W, ADDR_BAR_H, 3, fill=1, stroke=0)
-    c.setFont("Helvetica-Bold", 8)
-    c.setFillColor(WHITE)
-    label = (f"Grupo de Dirección: {display_addr}"
-             if display_addr else "Grupo de Dirección: (sin dirección registrada)")
-    c.drawString(MARGIN + 8, y - ADDR_BAR_H + 6, label)
-    return y - ADDR_BAR_H
-
-
-def _draw_column_headers(c, y):
-    c.setFillColor(BLUE_LIGHT)
-    c.rect(MARGIN, y - COL_HDR_H, USABLE_W, COL_HDR_H, fill=1, stroke=0)
-    c.setFont("Helvetica-Bold", 8)
-    c.setFillColor(WHITE)
-    x = MARGIN
-    for header, col_w in zip(HEADERS_ES, COL_WIDTHS):
-        c.drawString(x + 4, y - COL_HDR_H + 5, header)
-        x += col_w
-    return y - COL_HDR_H
-
-
-def _draw_data_row(c, y, row_data, row_index, warn_flags):
-    """
-    row_data   : [nombre, apellido, apto, cumpleaños, teléfono, grado, dirección]
-    warn_flags : parallel booleans — True = highlight yellow
-    """
-    base_bg = WHITE if row_index % 2 == 0 else BLUE_PALE
-    x = MARGIN
-    for col_w, warn in zip(COL_WIDTHS, warn_flags):
-        c.setFillColor(YELLOW_WARN if warn else base_bg)
-        c.rect(x, y - ROW_H, col_w, ROW_H, fill=1, stroke=0)
-        x += col_w
-
-    # Grid
-    c.setStrokeColor(GREY_LINE)
-    c.setLineWidth(0.3)
-    c.rect(MARGIN, y - ROW_H, USABLE_W, ROW_H, fill=0, stroke=1)
-    x = MARGIN
-    for col_w in COL_WIDTHS[:-1]:
-        x += col_w
-        c.line(x, y, x, y - ROW_H)
-
-    # Text
-    c.setFont("Helvetica", 8)
-    c.setFillColor(colors.black)
-    x = MARGIN
-    for val, col_w in zip(row_data, COL_WIDTHS):
-        text = str(val) if val else ""
-        max_chars = int(col_w / 5.2)
-        c.drawString(x + 4, y - ROW_H + 5, text[:max_chars])
-        x += col_w
-    return y - ROW_H
 
 
 def _rows_available(is_first_page):
@@ -447,24 +373,163 @@ def _rows_available(is_first_page):
     return int(content_h / ROW_H)
 
 
-def generate_pdf(event_name, location_name, attendees):
-    filename = "Roster.pdf"
-    c = rl_canvas.Canvas(filename, pagesize=landscape(letter))
-    gen_dt = datetime.now()   # single timestamp for the whole document
+# ── PDF draw primitives ───────────────────────────────────────────────────────
 
-    # ── Group by complex (ignore apt#), sort within group by apt# ─────────────
+def _draw_page_header(c, title, subtitle, gen_dt, visitor_count=0):
+    top    = PAGE_H - MARGIN
+    logo_h = 22
+    logo_w = logo_h * (300 / 58)
+    if os.path.exists(LOGO_PATH):
+        c.drawImage(LOGO_PATH, MARGIN, top - logo_h,
+                    width=logo_w, height=logo_h, mask='auto')
+        title_x = MARGIN + logo_w + 12
+    else:
+        title_x = MARGIN
+
+    # Campaign: tinted background strip across header area
+    campaign = _theme["campaign"]
+    if campaign:
+        c.setFillColor(T("col_header"))
+        c.setFillAlpha(0.10)
+        c.rect(0, PAGE_H - MARGIN - HEADER_H - 2, PAGE_W, HEADER_H + 2, fill=1, stroke=0)
+        c.setFillAlpha(1)
+
+    c.setFont("Helvetica-Bold", 14)
+    c.setFillColor(T("title"))
+    c.drawString(title_x, top - 15, title)
+
+    c.setFont("Helvetica", 8)
+    c.setFillColor(T("subtitle"))
+    c.drawString(title_x, top - 27, subtitle)
+
+    # Campaign name — centered, larger
+    if campaign:
+        emoji = _theme["emoji"]
+        label = f"{emoji}  {campaign}  {emoji}".strip()
+        c.setFont("Helvetica-BoldOblique", 11)
+        c.setFillColor(T("addr_bar"))
+        c.drawCentredString(PAGE_W / 2, top - 20, label)
+
+    # Visitor count top-right
+    if visitor_count:
+        vlabel = (f"★  {visitor_count} "
+                  f"visitante{'s' if visitor_count != 1 else ''} "
+                  f"nuevo{'s' if visitor_count != 1 else ''} esta semana")
+        c.setFont("Helvetica-Bold", 8)
+        c.setFillColor(GOLD_STAR)
+        c.drawRightString(PAGE_W - MARGIN, top - 10, vlabel)
+        c.setFont("Helvetica", 7)
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawRightString(PAGE_W - MARGIN, top - 21, _fecha_es(gen_dt))
+    else:
+        c.setFont("Helvetica", 7)
+        c.setFillColor(colors.HexColor("#888888"))
+        c.drawRightString(PAGE_W - MARGIN, top - 10, _fecha_es(gen_dt))
+
+    # Single clean rule
+    rule_y = top - HEADER_H + 4
+    c.setStrokeColor(T("rule"))
+    c.setLineWidth(1.5)
+    c.line(MARGIN, rule_y, PAGE_W - MARGIN, rule_y)
+    return rule_y - 4
+
+
+def _draw_page_footer(c, page_num):
+    c.setFont("Helvetica-Oblique", 7)
+    c.setFillColor(T("footer_text"))
+    c.drawString(MARGIN, MARGIN - 14, VERSE_TEXT)
+    c.setFont("Helvetica-Bold", 7)
+    c.drawString(MARGIN, MARGIN - 23, VERSE_REF)
+    c.setFillColor(GOLD_STAR)
+    c.circle(PAGE_W - MARGIN - 120, MARGIN - 15, 3, fill=1, stroke=0)
+    c.setFont("Helvetica-Oblique", 6.5)
+    c.setFillColor(colors.HexColor("#888888"))
+    c.drawString(PAGE_W - MARGIN - 114, MARGIN - 18, "= nuevo esta semana")
+    c.setFont("Helvetica", 7)
+    c.drawRightString(PAGE_W - MARGIN, MARGIN - 18, f"Página {page_num}")
+    c.setStrokeColor(T("rule"))
+    c.setLineWidth(0.8)
+    c.line(MARGIN, MARGIN - 4, PAGE_W - MARGIN, MARGIN - 4)
+
+
+def _draw_address_bar(c, display_addr, y):
+    c.setFillColor(T("addr_bar"))
+    c.roundRect(MARGIN, y - ADDR_BAR_H, USABLE_W, ADDR_BAR_H, 3, fill=1, stroke=0)
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(WHITE)
+    label = (f"Grupo de Dirección: {display_addr}"
+             if display_addr else "Grupo de Dirección: (sin dirección registrada)")
+    c.drawString(MARGIN + 8, y - ADDR_BAR_H + 6, label)
+    return y - ADDR_BAR_H
+
+
+def _draw_column_headers(c, y, col_widths=None, headers=None):
+    col_widths = col_widths or COL_WIDTHS
+    headers    = headers    or HEADERS_ES
+    c.setFillColor(T("col_header"))
+    c.rect(MARGIN, y - COL_HDR_H, USABLE_W, COL_HDR_H, fill=1, stroke=0)
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(WHITE)
+    x = MARGIN
+    for header, col_w in zip(headers, col_widths):
+        if header:
+            c.drawString(x + 4, y - COL_HDR_H + 5, header)
+        x += col_w
+    return y - COL_HDR_H
+
+
+def _draw_data_row(c, y, row_data, row_index, warn_flags,
+                   is_visitor=False, col_widths=None):
+    col_widths = col_widths or COL_WIDTHS
+    base_bg    = WHITE if row_index % 2 == 0 else T("row_alt")
+    x = MARGIN
+
+    for i, (col_w, warn) in enumerate(zip(col_widths, warn_flags)):
+        c.setFillColor(base_bg if i == 0 else (YELLOW_WARN if warn else base_bg))
+        c.rect(x, y - ROW_H, col_w, ROW_H, fill=1, stroke=0)
+        x += col_w
+
+    c.setStrokeColor(GREY_LINE)
+    c.setLineWidth(0.3)
+    c.rect(MARGIN, y - ROW_H, USABLE_W, ROW_H, fill=0, stroke=1)
+    x = MARGIN
+    for col_w in col_widths[:-1]:
+        x += col_w
+        c.line(x, y, x, y - ROW_H)
+
+    if is_visitor:
+        c.setFillColor(GOLD_STAR)
+        c.circle(MARGIN + col_widths[0] / 2, y - ROW_H / 2, 4, fill=1, stroke=0)
+
+    c.setFont("Helvetica", 8)
+    c.setFillColor(colors.black)
+    x = MARGIN + col_widths[0]
+    for val, col_w in zip(row_data[1:], col_widths[1:]):
+        text = str(val) if val else ""
+        c.drawString(x + 4, y - ROW_H + 5, text[:int(col_w / 5.2)])
+        x += col_w
+
+    return y - ROW_H
+
+
+
+# ── Address-grouped PDF (Rutas → Direcciones-Roster.pdf) ─────────────────────
+
+def generate_address_pdf(location_name, attendees, filename="Direcciones-Roster.pdf"):
+    visitor_count = sum(1 for p in attendees if p.get("is_visitor"))
+    c      = rl_canvas.Canvas(filename, pagesize=landscape(letter))
+    gen_dt = datetime.now()
+
     complex_groups = defaultdict(list)
     for person in attendees:
         addr = (person.get("address") or "").strip()
         complex_groups[_complex_key(addr)].append(person)
-
     for key in complex_groups:
         complex_groups[key].sort(key=lambda p: _parse_apt_number(p.get("address") or ""))
-
-    def group_sort(item):
-        k, _ = item
-        return (0, k) if k else (1, "")
-    sorted_groups = sorted(complex_groups.items(), key=group_sort)
+    sorted_groups = sorted(
+        complex_groups.items(),
+        key=lambda kv: (0, kv[0]) if kv[0] else (1, "")
+    )
 
     page_num    = 1
     first_group = True
@@ -472,18 +537,17 @@ def generate_pdf(event_name, location_name, attendees):
     def new_page(is_first):
         if not is_first:
             c.showPage()
-        _draw_page_header(c, location_name, "Ministerio de Autobuses", gen_dt)
-        return PAGE_H - MARGIN - HEADER_H - 4
+        return _draw_page_header(c, location_name, "Ministerio de Autobuses",
+                                 gen_dt, visitor_count)
 
     cursor_y  = new_page(is_first=True)
     rows_left = _rows_available(is_first_page=True)
 
     for group_key, group_people in sorted_groups:
-        # Display address = street only (no apt#) from first person in group
-        raw_addr    = (group_people[0].get("address") or "").strip() if group_people else ""
-        bar_addr    = _street_only(raw_addr)
+        raw_addr = (group_people[0].get("address") or "").strip() if group_people else ""
+        bar_addr = _street_only(raw_addr)
+        needed   = len(group_people) + MIN_EMPTY_ROWS + 1
 
-        needed = len(group_people) + MIN_EMPTY_ROWS + 1
         if rows_left < needed and not first_group:
             _draw_page_footer(c, page_num)
             page_num += 1
@@ -491,70 +555,55 @@ def generate_pdf(event_name, location_name, attendees):
             rows_left = _rows_available(is_first_page=False)
 
         first_group = False
-        cursor_y  = _draw_address_bar(c, bar_addr, cursor_y)
-        cursor_y  = _draw_column_headers(c, cursor_y)
-        rows_left -= 1
-        row_index  = 0
+        cursor_y    = _draw_address_bar(c, bar_addr, cursor_y)
+        cursor_y    = _draw_column_headers(c, cursor_y)
+        rows_left  -= 1
+        row_index   = 0
 
         for person in group_people:
             if rows_left <= 0:
                 _draw_page_footer(c, page_num)
-                page_num += 1
-                cursor_y  = new_page(is_first=False)
-                cursor_y  = _draw_address_bar(c, bar_addr, cursor_y)
-                cursor_y  = _draw_column_headers(c, cursor_y)
-                rows_left = _rows_available(is_first_page=False) - 1
-                row_index = 0
+                page_num  += 1
+                cursor_y   = new_page(is_first=False)
+                cursor_y   = _draw_address_bar(c, bar_addr, cursor_y)
+                cursor_y   = _draw_column_headers(c, cursor_y)
+                rows_left  = _rows_available(is_first_page=False) - 1
+                row_index  = 0
 
-            fn   = person.get("first_name", "")
-            ln   = person.get("last_name",  "")
-            addr = person.get("address",    "")
-            apt  = _extract_apt(addr)
-            bday_raw = person.get("birthday", "")
-            bday = _fmt_birthday(bday_raw)
-            ph   = person.get("phone", "")
-            grade = _resolve_grade(person.get("grade", ""), bday_raw)
-            addr_display = _street_only(addr)
+            fn, ln   = person.get("first_name",""), person.get("last_name","")
+            addr     = person.get("address","")
+            bday_raw = person.get("birthday","")
+            bday     = _fmt_birthday(bday_raw)
+            ph       = person.get("phone","")
+            grade    = _resolve_grade(person.get("grade",""), bday_raw)
+            apt      = _extract_apt(addr)
+            addr_d   = _street_only(addr)
+            attend   = person.get("attendance", "")
+            is_v     = person.get("is_visitor", False)
 
-            # Grade cell yellow only if person is a minor but grade is missing
-            is_child = _is_minor(bday_raw)
-            grade_warn = is_child and not grade
+            grade_warn = _is_minor(bday_raw) and not grade
+            warn = [False, not fn, not ln, not bday, not ph,
+                    grade_warn, False, False, _is_bad_address(addr)]
 
-            # Column order: Nombre, Apellido, Cumpleaños, Teléfono, Grado, Apto., Dirección
-            warn = [
-                not fn,
-                not ln,
-                not bday,
-                not ph,
-                grade_warn,
-                False,                   # Apto — always optional
-                _is_bad_address(addr),
-            ]
-            cursor_y  = _draw_data_row(
-                c, cursor_y,
-                [fn, ln, bday, ph, grade, apt, addr_display],
-                row_index, warn
-            )
+            cursor_y  = _draw_data_row(c, cursor_y,
+                                       ["", fn, ln, bday, ph, grade, apt, attend, addr_d],
+                                       row_index, warn, is_visitor=is_v)
             rows_left -= 1
             row_index += 1
 
-        # ── Empty writable rows ────────────────────────────────────────────
         if rows_left < MIN_EMPTY_ROWS:
             _draw_page_footer(c, page_num)
-            page_num += 1
-            cursor_y  = new_page(is_first=False)
-            cursor_y  = _draw_address_bar(c, bar_addr, cursor_y)
-            cursor_y  = _draw_column_headers(c, cursor_y)
-            rows_left = _rows_available(is_first_page=False) - 1
-            row_index = 0
+            page_num  += 1
+            cursor_y   = new_page(is_first=False)
+            cursor_y   = _draw_address_bar(c, bar_addr, cursor_y)
+            cursor_y   = _draw_column_headers(c, cursor_y)
+            rows_left  = _rows_available(is_first_page=False) - 1
+            row_index  = 0
 
-        empty_to_draw = min(MIN_EMPTY_ROWS, rows_left)
-        for _ in range(empty_to_draw):
-            cursor_y  = _draw_data_row(
-                c, cursor_y,
-                ["", "", "", "", "", "", bar_addr],
-                row_index, [False]*7
-            )
+        for _ in range(min(MIN_EMPTY_ROWS, rows_left)):
+            cursor_y  = _draw_data_row(c, cursor_y,
+                                       ["","","","","","","","", bar_addr],
+                                       row_index, [False]*9)
             row_index += 1
             rows_left -= 1
 
@@ -563,7 +612,73 @@ def generate_pdf(event_name, location_name, attendees):
     return filename
 
 
-# ── Google Drive helpers ─────────────────────────────────────────────────────
+# ── Simple alphabetical roster PDF (Rutas → Lista.pdf + Escuela Dominical) ───
+
+def generate_simple_roster_pdf(location_name, subtitle, attendees,
+                                filename="Lista.pdf"):
+    """
+    Alphabetical roster — no address grouping, no empty rows.
+    Gold dot marks people added to PCO within the last 7 days (visitors).
+    """
+    visitor_count = sum(1 for p in attendees if p.get("is_visitor"))
+    c      = rl_canvas.Canvas(filename, pagesize=landscape(letter))
+    gen_dt = datetime.now()
+
+    rows_per_page = int((PAGE_H - 2*MARGIN - HEADER_H - COL_HDR_H - FOOTER_H) / ROW_H)
+
+    sorted_attendees = sorted(
+        attendees,
+        key=lambda p: (p.get("last_name","").lower(), p.get("first_name","").lower())
+    )
+
+    def new_page(is_first):
+        if not is_first:
+            c.showPage()
+        return _draw_page_header(c, location_name, subtitle, gen_dt, visitor_count)
+
+    cursor_y  = new_page(is_first=True)
+    cursor_y  = _draw_column_headers(c, cursor_y, SR_COL_WIDTHS, SR_HEADERS)
+    rows_left = rows_per_page
+    page_num  = 1
+    row_index = 0
+
+    for person in sorted_attendees:
+        if rows_left <= 0:
+            _draw_page_footer(c, page_num)
+            page_num  += 1
+            cursor_y   = new_page(is_first=False)
+            cursor_y   = _draw_column_headers(c, cursor_y, SR_COL_WIDTHS, SR_HEADERS)
+            rows_left  = rows_per_page
+            row_index  = 0
+
+        fn, ln   = person.get("first_name",""), person.get("last_name","")
+        addr     = person.get("address","")
+        bday_raw = person.get("birthday","")
+        bday     = _fmt_birthday(bday_raw)
+        ph       = person.get("phone","")
+        grade    = _resolve_grade(person.get("grade",""), bday_raw)
+        apt      = _extract_apt(addr)
+        addr_d   = _street_only(addr)
+        attend   = person.get("attendance", "")
+        is_v     = person.get("is_visitor", False)
+
+        grade_warn = _is_minor(bday_raw) and not grade
+        warn = [False, not fn, not ln, not bday, not ph,
+                grade_warn, False, False, _is_bad_address(addr)]
+
+        cursor_y  = _draw_data_row(c, cursor_y,
+                                   ["", fn, ln, bday, ph, grade, apt, attend, addr_d],
+                                   row_index, warn, is_visitor=is_v,
+                                   col_widths=SR_COL_WIDTHS)
+        rows_left -= 1
+        row_index += 1
+
+    _draw_page_footer(c, page_num)
+    c.save()
+    return filename
+
+
+# ── Google Drive helpers ──────────────────────────────────────────────────────
 
 def get_drive_service():
     credentials = service_account.Credentials.from_service_account_file(
@@ -579,150 +694,45 @@ def get_or_create_folder(service, parent_id, folder_name):
         f"mimeType='application/vnd.google-apps.folder' and "
         f"'{parent_id}' in parents and trashed=false"
     )
-    results = service.files().list(q=query, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+    results = service.files().list(
+        q=query, supportsAllDrives=True, includeItemsFromAllDrives=True
+    ).execute()
     files = results.get('files', [])
     if files:
         return files[0]['id']
-    metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [parent_id]}
-    folder = service.files().create(body=metadata, fields='id', supportsAllDrives=True).execute()
-    return folder['id']
+    metadata = {
+        'name': folder_name,
+        'mimeType': 'application/vnd.google-apps.folder',
+        'parents': [parent_id]
+    }
+    return service.files().create(
+        body=metadata, fields='id', supportsAllDrives=True
+    ).execute()['id']
 
 
-def upload_and_replace(service, folder_id, filename):
-    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
-    results = service.files().list(q=query, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+def upload_and_replace(service, folder_id, local_path, drive_name=None):
+    """Upload local_path to Drive, overwriting any existing file with the same name."""
+    drive_name = drive_name or os.path.basename(local_path)
+    query      = f"name='{drive_name}' and '{folder_id}' in parents and trashed=false"
+    results    = service.files().list(
+        q=query, supportsAllDrives=True, includeItemsFromAllDrives=True
+    ).execute()
     files = results.get('files', [])
-    media = MediaFileUpload(filename, mimetype='application/pdf')
+    media = MediaFileUpload(local_path, mimetype='application/pdf')
     if files:
-        service.files().update(fileId=files[0]['id'], media_body=media, supportsAllDrives=True).execute()
+        service.files().update(
+            fileId=files[0]['id'], media_body=media, supportsAllDrives=True
+        ).execute()
     else:
-        metadata = {'name': filename, 'parents': [folder_id]}
-        service.files().create(body=metadata, media_body=media, supportsAllDrives=True).execute()
+        service.files().create(
+            body={'name': drive_name, 'parents': [folder_id]},
+            media_body=media, supportsAllDrives=True
+        ).execute()
 
 
-# ── Sunday School (Escuela Dominical) PDF ────────────────────────────────────
+# ── Check-in processing ───────────────────────────────────────────────────────
 
-ED_COL_WIDTHS = [115, 115, 72, 110, 48, 52, 208]
-ED_HEADERS    = ["Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Dirección"]
-
-
-def generate_escuela_pdf(location_name, attendees, bus_rider_ids):
-    """
-    Simple roster for Sunday school teachers.
-    attendees     : list of person records
-    bus_rider_ids : set of person_ids who rode the bus in the last 5 weeks
-    """
-    filename = "Roster.pdf"
-    c = rl_canvas.Canvas(filename, pagesize=landscape(letter))
-    gen_dt = datetime.now()
-
-    def new_page(is_first):
-        if not is_first:
-            c.showPage()
-        _draw_page_header(c, location_name, "Escuela Dominical", gen_dt)
-        return PAGE_H - MARGIN - HEADER_H - 4
-
-    # Column header row (reuse draw helper with ED headers/widths)
-    def draw_ed_col_headers(y):
-        c.setFillColor(BLUE_LIGHT)
-        c.rect(MARGIN, y - COL_HDR_H, USABLE_W, COL_HDR_H, fill=1, stroke=0)
-        c.setFont("Helvetica-Bold", 8)
-        c.setFillColor(WHITE)
-        x = MARGIN
-        for header, col_w in zip(ED_HEADERS, ED_COL_WIDTHS):
-            c.drawString(x + 4, y - COL_HDR_H + 5, header)
-            x += col_w
-        return y - COL_HDR_H
-
-    def draw_ed_row(y, row_data, row_index, warn_flags):
-        base_bg = WHITE if row_index % 2 == 0 else BLUE_PALE
-        x = MARGIN
-        for col_w, warn in zip(ED_COL_WIDTHS, warn_flags):
-            c.setFillColor(YELLOW_WARN if warn else base_bg)
-            c.rect(x, y - ROW_H, col_w, ROW_H, fill=1, stroke=0)
-            x += col_w
-        c.setStrokeColor(GREY_LINE)
-        c.setLineWidth(0.3)
-        c.rect(MARGIN, y - ROW_H, USABLE_W, ROW_H, fill=0, stroke=1)
-        x = MARGIN
-        for col_w in ED_COL_WIDTHS[:-1]:
-            x += col_w
-            c.line(x, y, x, y - ROW_H)
-        c.setFont("Helvetica", 8)
-        c.setFillColor(colors.black)
-        x = MARGIN
-        for val, col_w in zip(row_data, ED_COL_WIDTHS):
-            text = str(val) if val else ""
-            max_chars = int(col_w / 5.2)
-            c.drawString(x + 4, y - ROW_H + 5, text[:max_chars])
-            x += col_w
-        return y - ROW_H
-
-    # Sort attendees alphabetically by last name, then first name
-    sorted_attendees = sorted(attendees, key=lambda p: (p.get("last_name","").lower(),
-                                                         p.get("first_name","").lower()))
-
-    rows_per_page = int((PAGE_H - 2*MARGIN - HEADER_H - COL_HDR_H - FOOTER_H) / ROW_H)
-
-    cursor_y  = new_page(is_first=True)
-    cursor_y  = draw_ed_col_headers(cursor_y)
-    rows_left = rows_per_page
-    page_num  = 1
-    row_index = 0
-
-    for person in sorted_attendees:
-        if rows_left <= 0:
-            _draw_page_footer(c, page_num)
-            page_num += 1
-            cursor_y  = new_page(is_first=False)
-            cursor_y  = draw_ed_col_headers(cursor_y)
-            rows_left = rows_per_page
-            row_index = 0
-
-        fn       = person.get("first_name", "")
-        ln       = person.get("last_name",  "")
-        bday_raw = person.get("birthday",   "")
-        bday     = _fmt_birthday(bday_raw)
-        ph       = person.get("phone",      "")
-        addr     = person.get("address",    "")
-        apt      = _extract_apt(addr)
-        addr_display = _street_only(addr)
-        grade    = _resolve_grade(person.get("grade",""), bday_raw)
-
-        pid      = person.get("person_id")
-        is_bus   = pid in bus_rider_ids if pid else False
-
-        is_child   = _is_minor(bday_raw)
-        grade_warn = is_child and not grade
-
-        warn = [
-            not fn,
-            not ln,
-            not bday,
-            not ph,
-            grade_warn,
-            False,
-            _is_bad_address(addr),
-        ]
-
-        cursor_y  = draw_ed_row(cursor_y, [fn, ln, bday, ph, grade, apt, addr_display],
-                                row_index, warn)
-        rows_left -= 1
-        row_index += 1
-
-    _draw_page_footer(c, page_num)
-    c.save()
-    return filename
-
-
-# ── Main ─────────────────────────────────────────────────────────────────────
-
-def _build_attendees(checkins, included, weeks):
-    """
-    Shared helper: deduplicate check-ins, fetch person details, return
-    (grouped_by_location, person_id_set_with_kind).
-    Also returns a flat dict: person_id → record, and kind tracking.
-    """
+def _build_attendees(checkins, included, total_weeks=5):
     location_lookup = {
         item["id"]: item["attributes"]["name"]
         for item in included if item["type"] == "Location"
@@ -732,12 +742,25 @@ def _build_attendees(checkins, included, weeks):
         for item in included if item["type"] == "Person"
     }
 
-    grouped       = defaultdict(list)
-    seen          = defaultdict(set)
-    # person_id → set of kinds seen (e.g. {'Regular', 'Guest'})
-    person_kinds  = defaultdict(set)
-    unique_count  = 0
-    skipped_count = 0
+    # First pass: count distinct event periods per (person_id, location)
+    attendance_counts = defaultdict(set)  # (person_id, location_name) → set of ep_ids
+    for checkin in checkins:
+        location_data = checkin["relationships"]["locations"]["data"]
+        if not location_data:
+            continue
+        location_id   = location_data[0]["id"]
+        location_name = location_lookup.get(location_id, "Unknown Location")
+        person_rel    = checkin["relationships"].get("person", {}).get("data")
+        person_id     = person_rel["id"] if person_rel else None
+        ep_id = checkin.get("relationships", {}).get("event_period", {}).get("data", {}).get("id")
+        if person_id and ep_id:
+            attendance_counts[(person_id, location_name)].add(ep_id)
+
+    # Second pass: build deduplicated records
+    grouped      = defaultdict(list)
+    seen         = defaultdict(set)
+    unique_count = 0
+    skip_count   = 0
 
     for checkin in checkins:
         location_data = checkin["relationships"]["locations"]["data"]
@@ -750,24 +773,27 @@ def _build_attendees(checkins, included, weeks):
         person_rel = checkin["relationships"].get("person", {}).get("data")
         person_id  = person_rel["id"] if person_rel else None
 
-        kind = checkin["attributes"].get("kind", "")
-        if person_id:
-            person_kinds[person_id].add(kind)
-
         if person_id and person_id in seen[location_name]:
-            skipped_count += 1
+            skip_count += 1
             continue
         if person_id:
             seen[location_name].add(person_id)
 
+        # Attendance rate: how many of the N weeks did they show up?
+        weeks_attended = len(attendance_counts.get((person_id, location_name), set()))
+        attendance_str = f"{weeks_attended}/{total_weeks}" if person_id else ""
+
         record = {
-            "person_id":  person_id,
-            "first_name": checkin["attributes"]["first_name"],
-            "last_name":  checkin["attributes"]["last_name"],
-            "phone":    "",
-            "address":  "",
-            "birthday": "",
-            "grade":    "",
+            "person_id":   person_id,
+            "first_name":  checkin["attributes"]["first_name"],
+            "last_name":   checkin["attributes"]["last_name"],
+            "phone":       "",
+            "address":     "",
+            "birthday":    "",
+            "grade":       "",
+            "created_at":  "",
+            "is_visitor":  False,
+            "attendance":  attendance_str,
         }
 
         if person_id:
@@ -776,32 +802,67 @@ def _build_attendees(checkins, included, weeks):
                 record["birthday"] = sideloaded["attributes"].get("birthdate") or ""
 
             if person_id not in _person_cache:
-                print(f"  [{unique_count + 1}] Fetching {record['first_name']} {record['last_name']} (id: {person_id})...", flush=True)
+                print(f"  [{unique_count + 1}] Fetching {record['first_name']} "
+                      f"{record['last_name']} (id: {person_id})...", flush=True)
                 time.sleep(0.5)
             else:
-                print(f"  [{unique_count + 1}] Cached: {record['first_name']} {record['last_name']}", flush=True)
+                print(f"  [{unique_count + 1}] Cached: "
+                      f"{record['first_name']} {record['last_name']}", flush=True)
 
             details = get_person_details(person_id)
-            record.update(details)
+            record.update({k: v for k, v in details.items()})
+            # Restore attendance after update (get_person_details doesn't return it)
+            record["attendance"] = attendance_str
+
+            # Visitor = added to PCO within the last 7 days
+            created_str = record.get("created_at", "")
+            if created_str:
+                try:
+                    created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                    record["is_visitor"] = (datetime.now(timezone.utc) - created_dt).days < 7
+                except Exception:
+                    pass
 
         unique_count += 1
         grouped[location_name].append(record)
 
-    print(f"  Processed {unique_count} unique, skipped {skipped_count} duplicates.", flush=True)
-    return grouped, location_lookup, person_kinds
+    print(f"  Processed {unique_count} unique, skipped {skip_count} duplicates.", flush=True)
+    return grouped, location_lookup
 
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate PCO check-in rosters and upload to Google Drive.")
-    parser.add_argument("event_name", help="PCO event name: 'Rutas' or 'Escuela Dominical'")
-    parser.add_argument("--weeks", type=int, default=5, help="Number of recent weeks (default: 5)")
+    parser = argparse.ArgumentParser(
+        description="Generate PCO check-in rosters and upload to Google Drive."
+    )
+    parser.add_argument(
+        "event_name",
+        help="PCO event name: 'Rutas' or 'Escuela Dominical'"
+    )
+    parser.add_argument(
+        "--weeks", type=int, default=5,
+        help="Number of recent weeks to include (default: 5)"
+    )
+    parser.add_argument(
+        "--theme",
+        choices=["primavera", "verano", "otono", "invierno"],
+        default=None,
+        help="Optional campaign theme: primavera, verano, otono, invierno"
+    )
     args = parser.parse_args()
+
+    # Apply theme globally before any PDF generation
+    global _theme
+    _theme = THEMES[args.theme]
+    if args.theme:
+        print(f"Theme: {_theme['campaign']}", flush=True)
 
     event_name = args.event_name
 
-    # ── RUTAS ─────────────────────────────────────────────────────────────────
+    # ── RUTAS ──────────────────────────────────────────────────────────────────
     if event_name == "Rutas":
-        print(f"Finding event 'Rutas'...", flush=True)
+        print("Finding event 'Rutas'...", flush=True)
         event_id = get_event_id("Rutas")
         print("Event ID:", event_id, flush=True)
 
@@ -811,24 +872,33 @@ def main():
         print("Fetching check-ins...", flush=True)
         checkins, included = get_checkins_for_event_periods(event_id, event_period_ids)
 
-        grouped, location_lookup, _ = _build_attendees(checkins, included, args.weeks)
+        grouped, location_lookup = _build_attendees(checkins, included, args.weeks)
         print(f"Locations found: {list(location_lookup.values())}", flush=True)
 
         print("\nConnecting to Google Drive...", flush=True)
         drive_service = get_drive_service()
 
         for location_name, attendees in grouped.items():
-            print(f"\nGenerating PDF for {location_name} ({len(attendees)} attendees)...", flush=True)
-            pdf_file = generate_pdf("Rutas", location_name, attendees)
-            location_folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
-            upload_and_replace(drive_service, location_folder_id, pdf_file)
-            os.remove(pdf_file)
-            print(f"  ✓ Uploaded roster for {location_name}", flush=True)
+            vc = sum(1 for p in attendees if p.get("is_visitor"))
+            print(f"\nGenerating PDFs for {location_name} "
+                  f"({len(attendees)} attendees, {vc} new this week)...", flush=True)
 
-    # ── ESCUELA DOMINICAL ─────────────────────────────────────────────────────
+            addr_pdf  = generate_address_pdf(location_name, attendees, "Direcciones-Roster.pdf")
+            lista_pdf = generate_simple_roster_pdf(
+                location_name, "Ministerio de Autobuses", attendees, "Roster.pdf"
+            )
+
+            folder_id = get_or_create_folder(
+                drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name
+            )
+            upload_and_replace(drive_service, folder_id, addr_pdf,  "Direcciones-Roster.pdf")
+            upload_and_replace(drive_service, folder_id, lista_pdf, "Roster.pdf")
+            os.remove(addr_pdf)
+            os.remove(lista_pdf)
+            print(f"  ✓ Uploaded Direcciones-Roster.pdf + Roster.pdf for {location_name}", flush=True)
+
+    # ── ESCUELA DOMINICAL ──────────────────────────────────────────────────────
     elif event_name == "Escuela Dominical":
-
-        # Step 1: fetch Escuela Dominical check-ins
         print("Finding event 'Escuela Dominical'...", flush=True)
         ed_event_id = get_event_id("Escuela Dominical")
         print("Event ID:", ed_event_id, flush=True)
@@ -837,24 +907,33 @@ def main():
         ed_period_ids = get_recent_event_periods(ed_event_id, weeks=args.weeks)
 
         print("Fetching Escuela Dominical check-ins...", flush=True)
-        ed_checkins, ed_included = get_checkins_for_event_periods(ed_event_id, ed_period_ids)
-        ed_grouped, ed_location_lookup, _ = _build_attendees(ed_checkins, ed_included, args.weeks)
-        print(f"Locations found: {list(ed_location_lookup.values())}", flush=True)
+        ed_checkins, ed_included = get_checkins_for_event_periods(
+            ed_event_id, ed_period_ids
+        )
+        ed_grouped, ed_loc_lookup = _build_attendees(ed_checkins, ed_included, args.weeks)
+        print(f"Locations found: {list(ed_loc_lookup.values())}", flush=True)
 
-        # Step 2: generate one PDF per Sunday school class location
         print("\nConnecting to Google Drive...", flush=True)
         drive_service = get_drive_service()
 
         for location_name, attendees in ed_grouped.items():
-            print(f"\nGenerating Sunday school roster for {location_name} ({len(attendees)} attendees)...", flush=True)
-            pdf_file = generate_escuela_pdf(location_name, attendees, set())
-            location_folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
-            upload_and_replace(drive_service, location_folder_id, pdf_file)
+            vc = sum(1 for p in attendees if p.get("is_visitor"))
+            print(f"\nGenerating roster for {location_name} "
+                  f"({len(attendees)} attendees, {vc} new this week)...", flush=True)
+
+            pdf_file = generate_simple_roster_pdf(
+                location_name, "Escuela Dominical", attendees, "Roster.pdf"
+            )
+            folder_id = get_or_create_folder(
+                drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name
+            )
+            upload_and_replace(drive_service, folder_id, pdf_file, "Roster.pdf")
             os.remove(pdf_file)
-            print(f"  ✓ Uploaded roster for {location_name}", flush=True)
+            print(f"  ✓ Uploaded Roster.pdf for {location_name}", flush=True)
 
     else:
-        print(f"Unknown event '{event_name}'. Supported: 'Rutas', 'Escuela Dominical'", flush=True)
+        print(f"Unknown event '{event_name}'. Supported: 'Rutas', 'Escuela Dominical'",
+              flush=True)
         sys.exit(1)
 
     print("\nDone.", flush=True)
