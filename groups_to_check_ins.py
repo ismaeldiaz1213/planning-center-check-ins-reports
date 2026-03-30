@@ -20,9 +20,9 @@ api_auth = HTTPBasicAuth(PCO_APP_ID, PCO_SECRET)
 # (set in main() before calling get_web_session)
 _event_period_id_holder = [None]
 
-EVENT_NAME = "Escuela Dominical"
-GROUP_NAME = "11th and 12th Grade Class"
-LOCATION_NAME = "11th and 12th Grade Class"
+EVENT_NAME = "Rutas"
+GROUP_NAME = "Ruta 9"
+LOCATION_NAME = "Ruta 9"
 
 BATCH_SIZE = 25  # people per bulk request
 
@@ -321,7 +321,7 @@ def bulk_checkin(session, event_period_id, event_time_id, event_id, location_id,
 
 def main():
     print("=" * 55)
-    print("  Auto Check-In: 5th Grade Boys → Escuela Dominical")
+    print("  Auto Check-In: Specific Group → Check-ins Event")
     print("=" * 55)
 
     if not PCO_SESSION_COOKIE:

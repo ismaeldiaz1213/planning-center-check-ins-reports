@@ -24,6 +24,9 @@ planning-center-check-ins-reports/
 ├── preview.py               # Local preview tool — generates PDFs with mock data
 ├── auto_checkin.py          # Optional: bulk check-in a PCO group to an event
 ├── ibl_logo.png             # Church logo used in all PDFs
+├── assets/                  # Theme image assets (baked into Docker image)
+│   ├── SoccerBall.png       # Visitor marker for the primavera theme
+│   └── gold_medal.png       # Campaign header icon for the primavera theme
 ├── credentials.json         # Google service account key (never commit this)
 ├── .env                     # Local credentials (never commit this)
 ├── .env.example             # Template — copy to .env and fill in
@@ -60,7 +63,7 @@ Each class location receives:
 
 | Column | Notes |
 |--------|-------|
-| ● (dot) | Gold = new to PCO this week (visitor) |
+| ● / ⚽ | Visitor marker — gold dot by default; soccer ball PNG for the `primavera` theme |
 | Nombre / Apellido | First and last name |
 | Cumpleaños | Birthday in MM/DD/YYYY format |
 | Teléfono | Primary phone number |
@@ -75,7 +78,7 @@ Each class location receives:
 
 ## Campaign Themes
 
-Pass `--theme` to apply a seasonal colour scheme. The campaign name appears centered in the header. Yellow warning highlights and the gold visitor dot are always preserved regardless of theme.
+Pass `--theme` to apply a seasonal colour scheme. The campaign name appears centered in the header. Yellow warning highlights are always preserved regardless of theme.
 
 ```bash
 python main.py "Rutas" --theme primavera
@@ -84,13 +87,15 @@ python main.py "Rutas" --theme otono
 python main.py "Rutas" --theme invierno
 ```
 
-| Theme | Colours | Label |
-|-------|---------|-------|
-| *(none)* | IBL navy/blue (default) | — |
-| `primavera` | Greens | 🌿 Campaña de Primavera |
-| `verano` | Orange/red | ☀️ Campaña de Verano |
-| `otono` | Brown/tan | 🍂 Campaña de Otoño |
-| `invierno` | Deep indigo/blue | ❄️ Campaña de Invierno |
+| Theme | Colours | Label | Visitor marker | Header icon |
+|-------|---------|-------|----------------|-------------|
+| *(none)* | IBL navy/blue (default) | — | Gold dot | — |
+| `primavera` | Greens | Campaña de Primavera | Soccer ball PNG | Gold medal PNG |
+| `verano` | Orange/red | Campaña de Verano | Gold dot | — |
+| `otono` | Brown/tan | Campaña de Otoño | Gold dot | — |
+| `invierno` | Deep indigo/blue | Campaña de Invierno | Gold dot | — |
+
+Theme image assets live in `assets/`. To add a custom visitor or header icon to any theme, drop the PNG in `assets/` and set `visitor_icon` or `campaign_icon` to its filename in the theme dict inside `main.py`.
 
 ---
 
@@ -281,9 +286,11 @@ Via `manage.sh` → option 7 — pick from the menu, no rebuild needed.
 Or manually:
 ```bash
 gcloud run jobs update roster-rutas \
-    --args="Rutas,--theme primavera" \
+    --args="Rutas,--theme,primavera" \
     --region=us-central1 --project=ibl-planning-center-check-ins
 ```
+
+> **Note:** Cloud Run `--args` is a comma-separated list of individual tokens. `--theme primavera` (with a space) is wrong — it becomes a single unrecognised argument. Use `--theme,primavera` (comma-separated) instead.
 
 To revert to default:
 ```bash
@@ -337,6 +344,7 @@ python auto_checkin.py
 | Job timed out | Both jobs are set to 3600s (1 hour). Should be sufficient for any church size. |
 | Session cookie expired | Grab fresh `planning_center_session` from your browser. |
 | Theme not applying | Remember to run both build + job update, or use `manage.sh → option 6` which does both. |
+| `unrecognized arguments: --theme primavera` in logs | The deployed image is stale — run `manage.sh → option 6` to rebuild with the current `main.py`. Also ensure `--args` uses commas, not spaces, between tokens. |
 
 ---
 

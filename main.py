@@ -32,6 +32,7 @@ PAGE_W, PAGE_H = landscape(letter)       # 792 x 612 pts
 MARGIN         = 36
 USABLE_W       = PAGE_W - 2 * MARGIN     # 720 pts
 LOGO_PATH      = os.path.join(os.path.abspath(os.path.dirname(__file__)), "ibl_logo.png")
+ASSETS_DIR     = os.path.join(os.path.abspath(os.path.dirname(__file__)), "assets")
 
 HEADER_H       = 46
 ADDR_BAR_H     = 20
@@ -58,59 +59,69 @@ GOLD_STAR   = colors.HexColor("#F5A623")   # visitor dot — always gold
 THEMES = {
     # Default IBL blue
     None: {
-        "title":      colors.HexColor("#0D1F5C"),
-        "subtitle":   colors.HexColor("#1a4b9c"),
-        "col_header": colors.HexColor("#4A90D9"),
-        "row_alt":    colors.HexColor("#EEF4FB"),
-        "addr_bar":   colors.HexColor("#2255aa"),
-        "rule":       colors.HexColor("#4A90D9"),
-        "footer_text":colors.HexColor("#0D1F5C"),
-        "campaign":   None,
-        "emoji":      "",
+        "title":         colors.HexColor("#0D1F5C"),
+        "subtitle":      colors.HexColor("#1a4b9c"),
+        "col_header":    colors.HexColor("#4A90D9"),
+        "row_alt":       colors.HexColor("#EEF4FB"),
+        "addr_bar":      colors.HexColor("#2255aa"),
+        "rule":          colors.HexColor("#4A90D9"),
+        "footer_text":   colors.HexColor("#0D1F5C"),
+        "campaign":      None,
+        "emoji":         "",
+        "visitor_icon":  None,   # None = default gold dot
+        "campaign_icon": None,   # None = no image beside campaign label
     },
     "primavera": {
-        "title":      colors.HexColor("#1B5E20"),
-        "subtitle":   colors.HexColor("#388E3C"),
-        "col_header": colors.HexColor("#43A047"),
-        "row_alt":    colors.HexColor("#E8F5E9"),
-        "addr_bar":   colors.HexColor("#2E7D32"),
-        "rule":       colors.HexColor("#81C784"),
-        "footer_text":colors.HexColor("#1B5E20"),
-        "campaign":   "Campaña de Primavera",
-        "emoji":      "🌿",
+        "title":         colors.HexColor("#1B5E20"),
+        "subtitle":      colors.HexColor("#388E3C"),
+        "col_header":    colors.HexColor("#43A047"),
+        "row_alt":       colors.HexColor("#E8F5E9"),
+        "addr_bar":      colors.HexColor("#2E7D32"),
+        "rule":          colors.HexColor("#81C784"),
+        "footer_text":   colors.HexColor("#1B5E20"),
+        "campaign":      "Campaña de Primavera",
+        "emoji":         "⚽",
+        "visitor_icon":  "SoccerBall.png",  # replaces gold dot for visitors
+        "campaign_icon": "gold_medal.png",  # shown beside campaign label
     },
     "verano": {
-        "title":      colors.HexColor("#BF360C"),
-        "subtitle":   colors.HexColor("#E64A19"),
-        "col_header": colors.HexColor("#FF7043"),
-        "row_alt":    colors.HexColor("#FBE9E7"),
-        "addr_bar":   colors.HexColor("#D84315"),
-        "rule":       colors.HexColor("#FFAB91"),
-        "footer_text":colors.HexColor("#BF360C"),
-        "campaign":   "Campaña de Verano",
-        "emoji":      "☀️",
+        "title":         colors.HexColor("#BF360C"),
+        "subtitle":      colors.HexColor("#E64A19"),
+        "col_header":    colors.HexColor("#FF7043"),
+        "row_alt":       colors.HexColor("#FBE9E7"),
+        "addr_bar":      colors.HexColor("#D84315"),
+        "rule":          colors.HexColor("#FFAB91"),
+        "footer_text":   colors.HexColor("#BF360C"),
+        "campaign":      "Campaña de Verano",
+        "emoji":         "☀️",
+        "visitor_icon":  None,
+        "campaign_icon": None,
     },
     "otono": {
-        "title":      colors.HexColor("#4E342E"),
-        "subtitle":   colors.HexColor("#6D4C41"),
-        "col_header": colors.HexColor("#8D6E63"),
-        "row_alt":    colors.HexColor("#EFEBE9"),
-        "addr_bar":   colors.HexColor("#5D4037"),
-        "rule":       colors.HexColor("#BCAAA4"),
-        "footer_text":colors.HexColor("#4E342E"),
-        "campaign":   "Campaña de Otoño",
-        "emoji":      "🍂",
+        "title":         colors.HexColor("#4E342E"),
+        "subtitle":      colors.HexColor("#6D4C41"),
+        "col_header":    colors.HexColor("#8D6E63"),
+        "row_alt":       colors.HexColor("#EFEBE9"),
+        "addr_bar":      colors.HexColor("#5D4037"),
+        "rule":          colors.HexColor("#BCAAA4"),
+        "footer_text":   colors.HexColor("#4E342E"),
+        "campaign":      "Campaña de Otoño",
+        "emoji":         "🍂",
+        "visitor_icon":  None,
+        "campaign_icon": None,
     },
     "invierno": {
-        "title":      colors.HexColor("#1A237E"),
-        "subtitle":   colors.HexColor("#3949AB"),
-        "col_header": colors.HexColor("#5C6BC0"),
-        "row_alt":    colors.HexColor("#E8EAF6"),
-        "addr_bar":   colors.HexColor("#283593"),
-        "rule":       colors.HexColor("#9FA8DA"),
-        "footer_text":colors.HexColor("#1A237E"),
-        "campaign":   "Campaña de Invierno",
-        "emoji":      "❄️",
+        "title":         colors.HexColor("#1A237E"),
+        "subtitle":      colors.HexColor("#3949AB"),
+        "col_header":    colors.HexColor("#5C6BC0"),
+        "row_alt":       colors.HexColor("#E8EAF6"),
+        "addr_bar":      colors.HexColor("#283593"),
+        "rule":          colors.HexColor("#9FA8DA"),
+        "footer_text":   colors.HexColor("#1A237E"),
+        "campaign":      "Campaña de Invierno",
+        "emoji":         "❄️",
+        "visitor_icon":  None,
+        "campaign_icon": None,
     },
 }
 
@@ -404,11 +415,25 @@ def _draw_page_header(c, title, subtitle, gen_dt, visitor_count=0):
 
     # Campaign name — centered, larger
     if campaign:
-        emoji = _theme["emoji"]
-        label = f"{emoji}  {campaign}  {emoji}".strip()
-        c.setFont("Helvetica-BoldOblique", 11)
+        campaign_icon = _theme["campaign_icon"]
+        icon_path = os.path.join(ASSETS_DIR, campaign_icon) if campaign_icon else None
+        icon_exists = icon_path is not None and os.path.exists(icon_path)
+
+        # When using image icons, omit the emoji from the string (emojis render
+        # as colored squares in ReportLab's standard fonts).
+        label = campaign if icon_exists else f"{_theme['emoji']}  {campaign}  {_theme['emoji']}".strip()
+        c.setFont("Helvetica-Bold", 11)
         c.setFillColor(T("addr_bar"))
         c.drawCentredString(PAGE_W / 2, top - 20, label)
+
+        if icon_exists:
+            icon_size = 13
+            label_w = c.stringWidth(label, "Helvetica-Bold", 11)
+            icon_y = top - 20 - icon_size + 3
+            c.drawImage(icon_path, PAGE_W / 2 - label_w / 2 - icon_size - 5, icon_y,
+                        width=icon_size, height=icon_size, mask='auto')
+            c.drawImage(icon_path, PAGE_W / 2 + label_w / 2 + 5, icon_y,
+                        width=icon_size, height=icon_size, mask='auto')
 
     # Visitor count top-right
     if visitor_count:
@@ -440,8 +465,21 @@ def _draw_page_footer(c, page_num):
     c.drawString(MARGIN, MARGIN - 14, VERSE_TEXT)
     c.setFont("Helvetica-Bold", 7)
     c.drawString(MARGIN, MARGIN - 23, VERSE_REF)
-    c.setFillColor(GOLD_STAR)
-    c.circle(PAGE_W - MARGIN - 120, MARGIN - 15, 3, fill=1, stroke=0)
+    visitor_icon = _theme["visitor_icon"]
+    if visitor_icon:
+        icon_path = os.path.join(ASSETS_DIR, visitor_icon)
+        if os.path.exists(icon_path):
+            icon_size = 8
+            cx = PAGE_W - MARGIN - 120
+            cy = MARGIN - 15
+            c.drawImage(icon_path, cx - icon_size / 2, cy - icon_size / 2,
+                        width=icon_size, height=icon_size, mask='auto')
+        else:
+            c.setFillColor(GOLD_STAR)
+            c.circle(PAGE_W - MARGIN - 120, MARGIN - 15, 3, fill=1, stroke=0)
+    else:
+        c.setFillColor(GOLD_STAR)
+        c.circle(PAGE_W - MARGIN - 120, MARGIN - 15, 3, fill=1, stroke=0)
     c.setFont("Helvetica-Oblique", 6.5)
     c.setFillColor(colors.HexColor("#888888"))
     c.drawString(PAGE_W - MARGIN - 114, MARGIN - 18, "= nuevo esta semana")
@@ -498,8 +536,21 @@ def _draw_data_row(c, y, row_data, row_index, warn_flags,
         c.line(x, y, x, y - ROW_H)
 
     if is_visitor:
-        c.setFillColor(GOLD_STAR)
-        c.circle(MARGIN + col_widths[0] / 2, y - ROW_H / 2, 4, fill=1, stroke=0)
+        visitor_icon = _theme["visitor_icon"]
+        if visitor_icon:
+            icon_path = os.path.join(ASSETS_DIR, visitor_icon)
+            if os.path.exists(icon_path):
+                icon_size = 9
+                cx = MARGIN + col_widths[0] / 2
+                cy = y - ROW_H / 2
+                c.drawImage(icon_path, cx - icon_size / 2, cy - icon_size / 2,
+                            width=icon_size, height=icon_size, mask='auto')
+            else:
+                c.setFillColor(GOLD_STAR)
+                c.circle(MARGIN + col_widths[0] / 2, y - ROW_H / 2, 4, fill=1, stroke=0)
+        else:
+            c.setFillColor(GOLD_STAR)
+            c.circle(MARGIN + col_widths[0] / 2, y - ROW_H / 2, 4, fill=1, stroke=0)
 
     c.setFont("Helvetica", 8)
     c.setFillColor(colors.black)

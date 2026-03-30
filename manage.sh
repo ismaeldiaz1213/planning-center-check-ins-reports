@@ -346,11 +346,11 @@ change_theme() {
     read -rp "  Choose: " THEME_CHOICE
 
     case $THEME_CHOICE in
-        1) THEME_FLAG="" ;                   THEME_LABEL="Default (azul IBL)" ;;
-        2) THEME_FLAG="--theme primavera";   THEME_LABEL="Campaña de Primavera" ;;
-        3) THEME_FLAG="--theme verano";      THEME_LABEL="Campaña de Verano" ;;
-        4) THEME_FLAG="--theme otono";       THEME_LABEL="Campaña de Otoño" ;;
-        5) THEME_FLAG="--theme invierno";    THEME_LABEL="Campaña de Invierno" ;;
+        1) THEME_VALUE="" ;          THEME_LABEL="Default (azul IBL)" ;;
+        2) THEME_VALUE="primavera";  THEME_LABEL="Campaña de Primavera" ;;
+        3) THEME_VALUE="verano";     THEME_LABEL="Campaña de Verano" ;;
+        4) THEME_VALUE="otono";      THEME_LABEL="Campaña de Otoño" ;;
+        5) THEME_VALUE="invierno";   THEME_LABEL="Campaña de Invierno" ;;
         *) warn "Invalid choice."; return ;;
     esac
 
@@ -361,9 +361,11 @@ change_theme() {
         local event_arg
         [[ "$job_name" == "roster-rutas" ]] && event_arg="Rutas" || event_arg="Escuela Dominical"
 
-        if [[ -n "$THEME_FLAG" ]]; then
+        # Cloud Run --args is a comma-separated list of individual tokens.
+        # "--theme primavera" as one token fails; must be "--theme,primavera" (two).
+        if [[ -n "$THEME_VALUE" ]]; then
             gcloud run jobs update "$job_name" \
-                --args="$event_arg,$THEME_FLAG" \
+                --args="$event_arg,--theme,$THEME_VALUE" \
                 --region="$REGION" \
                 --project="$PROJECT_ID"
         else

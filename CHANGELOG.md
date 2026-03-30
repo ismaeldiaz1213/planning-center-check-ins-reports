@@ -12,6 +12,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.1.0] — 2026-03-29
+
+### Added
+- **`assets/` folder** — houses per-theme image assets (`SoccerBall.png`, `gold_medal.png`). Baked into the Docker image via a new `COPY assets/ assets/` line in the Dockerfile, guaranteeing availability in Cloud Run.
+- **`ASSETS_DIR` constant** — resolves the `assets/` directory relative to the script file so paths work identically in local runs and inside the container.
+- **`visitor_icon` theme key** — themes can now specify a PNG filename (within `assets/`) to replace the default gold dot for visitor markers. Set to `"SoccerBall.png"` for `primavera`; `None` (gold dot) for all other themes. Falls back to the gold dot if the file is missing.
+- **`campaign_icon` theme key** — themes can now specify a PNG filename to display beside the campaign label in the page header. Set to `"gold_medal.png"` for `primavera`; `None` for all other themes. When set, one icon is drawn symmetrically on each side of the centered campaign name.
+- **Primavera visitor icon** — soccer ball PNG replaces the gold dot in both the data rows and the footer legend when the `primavera` theme is active.
+- **Primavera campaign icon** — gold medal PNG flanks the "Campaña de Primavera" header label on both sides.
+
+### Changed
+- **Campaign label font** changed from `Helvetica-BoldOblique` to `Helvetica-Bold` — removes the italic style from the header campaign name.
+- **Campaign label emoji removed when image icons are present** — ReportLab's standard fonts render emoji as coloured boxes. When a `campaign_icon` is set, the emoji string is omitted from the text and the icon image is used instead.
+
+### Fixed
+- **`manage.sh` theme args bug** — `change_theme()` was passing `--theme primavera` as a single space-separated token in `--args`, which Cloud Run splits only on commas. argparse received it as one unrecognised argument. Fixed by storing just the theme value and building the args string as `"$event_arg,--theme,$THEME_VALUE"`.
+
+---
+
 ## [2.0.0] — 2026-03-19
 
 Major overhaul. Switched from a single PDF per location to a full themed roster system with visitor detection and attendance tracking.
