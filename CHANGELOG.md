@@ -12,6 +12,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.2.0] — 2026-05-02
+
+Major internal restructuring. Behaviour and PDF output are unchanged — this
+release is purely about code organisation, testability, and CI.
+
+### Added
+- **`planning_center_reports/` package** — `main.py` is now a thin 7-line wrapper.
+  All logic is split into focused modules:
+  - `config.py` — env vars, layout constants, `THEMES`, `_theme` global, `T()` helper
+  - `models.py` — `Attendee` TypedDict + all pure helper functions (address parsing, grade/age logic, date formatting)
+  - `pco_client.py` — Planning Center API calls and person cache
+  - `drive_client.py` — Google Drive auth, folder creation, file upload
+  - `services.py` — `_build_attendees` + `run_rutas` / `run_escuela_dominical` orchestration
+  - `cli.py` — `argparse` entrypoint; applies theme then delegates to services
+  - `pdf/layout.py` — ReportLab drawing primitives (header, footer, address bar, rows)
+  - `pdf/rosters.py` — `generate_address_pdf` and `generate_simple_roster_pdf`
+- **`tests/` suite — 68 tests, all passing** — no credentials or network access required:
+  - `test_formatting.py` — `_fmt_birthday`, `_fecha_es`
+  - `test_address_parsing.py` — `_extract_apt`, `_complex_key`, `_street_only`, `_is_bad_address`, `_parse_apt_number`
+  - `test_grade_logic.py` — `_age_from_birthday`, `_is_minor`, `_resolve_grade`
+  - `test_attendance.py` — `_build_attendees` deduplication and attendance counting (mocked PCO calls)
+- **`.github/workflows/ci.yml`** — GitHub Actions CI runs `ruff check` + `pytest` on every push and pull request. Free for public repositories. Does not deploy automatically.
+- **`pyproject.toml`** — configures ruff (line length 110, excludes `previews/` and `assets/`) and pytest (`testpaths = ["tests"]`).
+- **`requirements-dev.txt`** — dev-only dependencies: `pytest` and `ruff`.
+
+### Changed
+- `preview.py` no longer monkey-patches `sys.modules` to stub out google/requests
+  imports. It now imports only `planning_center_reports.config` and
+  `planning_center_reports.pdf.rosters`, which have no network dependencies.
+- `manage.sh` option 6 label updated from "Deploy updated main.py" to "Deploy
+  updated code" and the existence check now also verifies the package directory.
+- `setup_gcloud.sh` prerequisites check now includes `planning_center_reports/`.
+- `Dockerfile` now copies `planning_center_reports/` into the image.
+
+---
+
 ## [2.1.0] — 2026-03-29
 
 ### Added

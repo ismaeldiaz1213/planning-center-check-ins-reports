@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 110
+# Exclude generated output and binary assets from linting
+exclude = ["previews/", "assets/", "groups_to_check_ins.py"]
+
+[tool.ruff.lint]
+# N802 — function name should be lowercase: T() is intentionally short
+ignore = ["N802"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -20,22 +20,45 @@ Automatically generates PDF rosters from Planning Center check-ins and uploads t
 
 ```
 planning-center-check-ins-reports/
-├── main.py                  # Core script — generates and uploads all PDFs
-├── preview.py               # Local preview tool — generates PDFs with mock data
-├── auto_checkin.py          # Optional: bulk check-in a PCO group to an event
-├── ibl_logo.png             # Church logo used in all PDFs
-├── assets/                  # Theme image assets (baked into Docker image)
-│   ├── SoccerBall.png       # Visitor marker for the primavera theme
-│   └── gold_medal.png       # Campaign header icon for the primavera theme
-├── credentials.json         # Google service account key (never commit this)
-├── .env                     # Local credentials (never commit this)
-├── .env.example             # Template — copy to .env and fill in
-├── .gcloudignore            # Tells gcloud what to exclude from builds (.env only)
-├── .gitignore               # Excludes credentials.json and .env from git
-├── requirements.txt         # Python dependencies
-├── Dockerfile               # Container definition for Cloud Run
-├── setup_gcloud.sh          # Run ONCE to deploy everything to Google Cloud
-└── manage.sh                # Day-to-day management (deploy, theme, logs, test)
+├── main.py                        # Thin entrypoint — calls the package's CLI
+├── preview.py                     # Local preview tool — generates PDFs with mock data
+├── auto_checkin.py                # Optional: bulk check-in a PCO group to an event
+│
+├── planning_center_reports/       # Main Python package
+│   ├── config.py                  #   Environment variables, layout constants, themes
+│   ├── models.py                  #   Attendee type + pure helper functions (testable)
+│   ├── pco_client.py              #   Planning Center API calls
+│   ├── drive_client.py            #   Google Drive upload logic
+│   ├── services.py                #   Orchestration: fetch → transform → generate → upload
+│   ├── cli.py                     #   argparse entrypoint
+│   └── pdf/
+│       ├── layout.py              #   Low-level ReportLab drawing primitives
+│       └── rosters.py             #   generate_address_pdf, generate_simple_roster_pdf
+│
+├── tests/                         # Automated test suite (run with pytest)
+│   ├── test_formatting.py         #   Birthday / date formatting
+│   ├── test_address_parsing.py    #   Apartment extraction, street normalisation
+│   ├── test_grade_logic.py        #   Age calculation, grade resolution
+│   └── test_attendance.py         #   Check-in deduplication, attendance counting
+│
+├── .github/workflows/ci.yml       # GitHub Actions CI — runs on every push
+├── pyproject.toml                 # ruff + pytest configuration
+├── requirements.txt               # Production dependencies
+├── requirements-dev.txt           # Dev tools: pytest, ruff
+├── DEVELOPMENT.md                 # Developer guide: testing, deploying, CI
+│
+├── ibl_logo.png                   # Church logo used in all PDFs
+├── assets/                        # Theme image assets (baked into Docker image)
+│   ├── SoccerBall.png             #   Visitor marker for the primavera theme
+│   └── gold_medal.png             #   Campaign header icon for the primavera theme
+├── credentials.json               # Google service account key (never commit this)
+├── .env                           # Local credentials (never commit this)
+├── .env.example                   # Template — copy to .env and fill in
+├── .gcloudignore                  # Tells gcloud what to exclude from builds (.env only)
+├── .gitignore                     # Excludes credentials.json and .env from git
+├── Dockerfile                     # Container definition for Cloud Run
+├── setup_gcloud.sh                # Run ONCE to deploy everything to Google Cloud
+└── manage.sh                      # Day-to-day management (deploy, theme, logs, test)
 ```
 
 ---
@@ -95,11 +118,27 @@ python main.py "Rutas" --theme invierno
 | `otono` | Brown/tan | Campaña de Otoño | Gold dot | — |
 | `invierno` | Deep indigo/blue | Campaña de Invierno | Gold dot | — |
 
-Theme image assets live in `assets/`. To add a custom visitor or header icon to any theme, drop the PNG in `assets/` and set `visitor_icon` or `campaign_icon` to its filename in the theme dict inside `main.py`.
+Theme image assets live in `assets/`. To add a custom visitor or header icon to any theme, drop the PNG in `assets/` and set `visitor_icon` or `campaign_icon` to its filename in the theme dict inside `planning_center_reports/config.py`.
 
 ---
 
-## Local Development & Preview
+## Local Development & Testing
+
+### Running the test suite
+
+```bash
+pip install -r requirements-dev.txt   # first time only
+pytest
+```
+
+68 tests cover address parsing, grade logic, date formatting, and the attendance
+deduplication logic. None of them require Planning Center or Google Drive credentials.
+
+```bash
+ruff check .   # linter — catches unused imports and style issues
+```
+
+### Generating PDF previews
 
 Use `preview.py` to generate sample PDFs without any credentials or live data. All mock data uses Chick-fil-A locations near the church so it is safe to commit publicly.
 
@@ -121,6 +160,8 @@ python preview.py --open
 ```
 
 Output goes to `previews/` in your project folder. Edit `MOCK_ATTENDEES` at the top of `preview.py` to test edge cases like missing fields, toddlers, or visitors.
+
+> See [DEVELOPMENT.md](DEVELOPMENT.md) for the full developer workflow, including how CI works and where to look when a test fails.
 
 ---
 
@@ -235,7 +276,7 @@ The script walks through everything interactively — project setup, API enablem
 
   DEPLOYMENT
   5)  Update credentials.json (rebuild + redeploy)
-  6)  Deploy updated main.py to Cloud
+  6)  Deploy updated code to Cloud
   7)  Change campaign theme
 
   TESTING & LOGS
@@ -255,7 +296,7 @@ The script walks through everything interactively — project setup, API enablem
 
 ## Deploying Code Changes
 
-When you edit `main.py`, deploy with:
+When you edit any file in `planning_center_reports/` (or `main.py`), deploy with:
 
 ```bash
 # Option A — management menu
@@ -344,7 +385,7 @@ python auto_checkin.py
 | Job timed out | Both jobs are set to 3600s (1 hour). Should be sufficient for any church size. |
 | Session cookie expired | Grab fresh `planning_center_session` from your browser. |
 | Theme not applying | Remember to run both build + job update, or use `manage.sh → option 6` which does both. |
-| `unrecognized arguments: --theme primavera` in logs | The deployed image is stale — run `manage.sh → option 6` to rebuild with the current `main.py`. Also ensure `--args` uses commas, not spaces, between tokens. |
+| `unrecognized arguments: --theme primavera` in logs | The deployed image is stale — run `manage.sh → option 6` to rebuild. Also ensure `--args` uses commas, not spaces, between tokens. |
 
 ---
 

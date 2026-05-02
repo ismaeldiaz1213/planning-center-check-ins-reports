@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
-"""
-preview.py — Generate sample PDFs locally for layout and theme testing.
-No Planning Center or Google Drive credentials needed.
-
-Usage:
-    python preview.py                    # all themes, both PDF types
-    python preview.py --theme primavera  # one specific theme
-    python preview.py --type roster      # only the simple roster PDF
-    python preview.py --type direcciones # only the address-grouped PDF
-    python preview.py --open             # open PDFs in your viewer after generating
-
-Output folder: ./previews/
-"""
+# preview.py
+#
+# Generate sample PDFs locally for layout and theme testing.
+# No Planning Center or Google Drive credentials needed — the package imports
+# only what it needs, so pco_client and drive_client are never loaded here.
+#
+# Usage:
+#   python preview.py                    # all themes, both PDF types
+#   python preview.py --theme primavera  # one specific theme
+#   python preview.py --type roster      # only the simple roster PDF
+#   python preview.py --type direcciones # only the address-grouped PDF
+#   python preview.py --open             # open PDFs in your viewer after generating
+#
+# Output folder: ./previews/
 
 import argparse
 import os
 import subprocess
-import sys
+
+import planning_center_reports.config as config
+from planning_center_reports.pdf.rosters import generate_address_pdf, generate_simple_roster_pdf
 
 # ── Mock data ─────────────────────────────────────────────────────────────────
-# Addresses and phone numbers use real Chick-fil-A locations near the church
-# so this data is safe to commit publicly.
-# Edit this list freely to test edge cases.
+# Addresses and phone numbers use real Chick-fil-A locations near the church so
+# this data is safe to commit publicly. Edit freely to test edge cases.
 
 MOCK_ATTENDEES = [
     # Complex 1 — 12935 TX-249 (multiple units, sorted by apt#)
@@ -74,7 +76,7 @@ MOCK_ATTENDEES = [
         "address": "430 Cypress Creek Pkwy, 13A, Houston, TX, 77090",
         "is_visitor": False,          "attendance": "5/5",
     },
-    # New visitors this week — gold dot, 165 West Road
+    # New visitors this week — visitor icon, 165 West Road
     {
         "person_id": "7",
         "first_name": "Marco",        "last_name": "Espinal",
@@ -146,15 +148,14 @@ MOCK_ATTENDEES = [
 ]
 
 THEMES_AVAILABLE = [None, "primavera", "verano", "otono", "invierno"]
-THEME_LABELS     = {
-    None:         "default (azul)",
-    "primavera":  "Campaña de Primavera",
-    "verano":     "Campaña de Verano",
-    "otono":      "Campaña de Otoño",
-    "invierno":   "Campaña de Invierno",
+THEME_LABELS = {
+    None:        "default (azul)",
+    "primavera": "Campaña de Primavera",
+    "verano":    "Campaña de Verano",
+    "otono":     "Campaña de Otoño",
+    "invierno":  "Campaña de Invierno",
 }
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Generate PDF previews with mock data.")
@@ -162,70 +163,49 @@ def main():
         "--theme",
         choices=["default", "primavera", "verano", "otono", "invierno"],
         default=None,
-        help="Generate only this theme (default: all themes)"
+        help="Generate only this theme (default: all themes)",
     )
     parser.add_argument(
         "--type",
         choices=["roster", "direcciones", "both"],
         default="both",
-        help="Which PDF type to generate (default: both)"
+        help="Which PDF type to generate (default: both)",
     )
     parser.add_argument(
-        "--open", action="store_true",
-        help="Open generated PDFs in your default viewer after generating"
+        "--open",
+        action="store_true",
+        help="Open generated PDFs in your default viewer after generating",
     )
     args = parser.parse_args()
 
-    # Stub out the imports that main.py needs but we don't have credentials for
-    import types
-    for mod in ["google", "google.oauth2", "google.oauth2.service_account",
-                "googleapiclient", "googleapiclient.discovery", "googleapiclient.http",
-                "dotenv", "requests"]:
-        if mod not in sys.modules:
-            sys.modules[mod] = types.ModuleType(mod)
-    sys.modules["dotenv"].load_dotenv = lambda: None
-    sys.modules["requests"].auth = types.ModuleType("auth")
-    sys.modules["requests.auth"] = sys.modules["requests"].auth
-    sys.modules["requests.auth"].HTTPBasicAuth = lambda a, b: None
-    sys.modules["google.oauth2"].service_account = types.ModuleType("sc")
-    sys.modules["googleapiclient.discovery"].build = lambda *a, **k: None
-    sys.modules["googleapiclient.http"].MediaFileUpload = lambda *a, **k: None
-    os.environ.setdefault("PCO_APP_ID", "preview")
-    os.environ.setdefault("PCO_SECRET", "preview")
-    os.environ.setdefault("GOOGLE_DRIVE_PARENT_FOLDER_ID", "preview")
-
-    import main as m
-
-    # Output folder
     out_dir = os.path.join(os.path.dirname(__file__), "previews")
     os.makedirs(out_dir, exist_ok=True)
 
     themes_to_run = (
         [None if args.theme == "default" else args.theme]
-        if args.theme else THEMES_AVAILABLE
+        if args.theme
+        else THEMES_AVAILABLE
     )
 
     generated = []
 
     for theme_key in themes_to_run:
-        m._theme = m.THEMES[theme_key]
-        slug     = theme_key or "default"
-        label    = THEME_LABELS[theme_key]
-
+        # Set the active theme on the shared config module — all PDF functions
+        # pick it up automatically via config.T().
+        config._theme = config.THEMES[theme_key]
+        slug  = theme_key or "default"
+        label = THEME_LABELS[theme_key]
         print(f"\n── {label} ──")
 
         if args.type in ("roster", "both"):
             path = os.path.join(out_dir, f"{slug}_Roster.pdf")
-            m.generate_simple_roster_pdf(
-                "Ruta 1 - Bus", "Ministerio de Autobuses",
-                MOCK_ATTENDEES, path
-            )
+            generate_simple_roster_pdf("Ruta 1 - Bus", "Ministerio de Autobuses", MOCK_ATTENDEES, path)
             print(f"  ✓ {os.path.basename(path)}")
             generated.append(path)
 
         if args.type in ("direcciones", "both"):
             path = os.path.join(out_dir, f"{slug}_Direcciones-Roster.pdf")
-            m.generate_address_pdf("Ruta 1 - Bus", MOCK_ATTENDEES, path)
+            generate_address_pdf("Ruta 1 - Bus", MOCK_ATTENDEES, path)
             print(f"  ✓ {os.path.basename(path)}")
             generated.append(path)
 

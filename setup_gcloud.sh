@@ -57,6 +57,8 @@ for f in main.py ibl_logo.png credentials.json Dockerfile requirements.txt; do
     [[ -f "$f" ]] || error "Missing required file: $f — run this from your project folder."
     success "Found $f"
 done
+[[ -d "planning_center_reports" ]] || error "Missing planning_center_reports/ package — run this from your project folder."
+success "Found planning_center_reports/"
 
 # ── Step 2: Create .gcloudignore ──────────────────────────────────────────────
 echo ""
@@ -289,7 +291,7 @@ echo "  To test manually right now:"
 echo -e "  ${CYAN}gcloud run jobs execute roster-rutas --region=$REGION --project=$PROJECT_ID${NC}"
 echo -e "  ${CYAN}gcloud run jobs execute roster-escuela-dominical --region=$REGION --project=$PROJECT_ID${NC}"
 echo ""
-echo "  To deploy updates after editing main.py:"
+echo "  To deploy updates after editing any code:"
 echo -e "  ${CYAN}./manage.sh  →  option 6${NC}"
 echo ""
 echo "  To view logs:"

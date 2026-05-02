@@ -47,7 +47,7 @@ show_menu() {
     echo ""
     echo -e "  ${BOLD}DEPLOYMENT${NC}"
     echo -e "  ${CYAN}5)${NC} Update credentials.json (rebuild + redeploy jobs)"
-    echo -e "  ${CYAN}6)${NC} Deploy updated main.py to Cloud"
+    echo -e "  ${CYAN}6)${NC} Deploy updated code to Cloud"
     echo -e "  ${CYAN}7)${NC} Change campaign theme"
     echo ""
     echo -e "  ${BOLD}TESTING & LOGS${NC}"
@@ -147,11 +147,11 @@ update_credentials() {
 
 deploy_script() {
     echo ""
-    echo -e "${BOLD}── Deploy Updated main.py ───────────────────────────────────${NC}"
+    echo -e "${BOLD}── Deploy Updated Code ──────────────────────────────────────${NC}"
     echo ""
 
-    if [[ ! -f "main.py" ]]; then
-        error "main.py not found. Run this from your project folder."
+    if [[ ! -f "main.py" ]] || [[ ! -d "planning_center_reports" ]]; then
+        error "Project files not found. Run this from your project folder."
         return
     fi
 
