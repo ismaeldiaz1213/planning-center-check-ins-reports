@@ -24,12 +24,15 @@ from planning_center_reports.config import (
     COL_HDR_H,
     FOOTER_H,
     ROW_H,
+    ED_COL_WIDTHS,
+    ED_HEADERS,
     SR_COL_WIDTHS,
     SR_HEADERS,
 )
 from planning_center_reports.models import (
     _complex_key,
     _extract_apt,
+    _extract_route_number,
     _fmt_birthday,
     _is_bad_address,
     _is_minor,
@@ -41,9 +44,11 @@ from planning_center_reports.pdf.layout import (
     _draw_address_bar,
     _draw_column_headers,
     _draw_data_row,
+    _draw_escuela_summary,
     _draw_page_footer,
     _draw_page_header,
     _rows_available,
+    escuela_summary_height,
 )
 
 
@@ -156,7 +161,9 @@ def generate_address_pdf(location_name: str, attendees: list, filename: str = "D
 
 
 def generate_simple_roster_pdf(location_name: str, subtitle: str,
-                                attendees: list, filename: str = "Lista.pdf") -> str:
+                                attendees: list, filename: str = "Lista.pdf",
+                                show_route: bool = False,
+                                sunday_data: list = None) -> str:
     """Generate the clean alphabetical roster PDF used by bus drivers and Sunday
     school teachers.
 
@@ -164,8 +171,18 @@ def generate_simple_roster_pdf(location_name: str, subtitle: str,
     no blank write-in rows. The visitor marker is drawn for people added to PCO
     within the last 7 days.
 
+    When show_route=True the Asist. column is replaced with Ruta (showing only
+    the route number), using the wider ED layout (Escuela Dominical format).
+    If sunday_data is also provided, a compact attendance summary (per-Sunday
+    counts and route totals) is drawn below the last attendee row.
+
     Returns the filename of the written PDF.
     """
+    from collections import Counter
+
+    col_widths = ED_COL_WIDTHS if show_route else SR_COL_WIDTHS
+    headers    = ED_HEADERS    if show_route else SR_HEADERS
+
     visitor_count = sum(1 for p in attendees if p.get("is_visitor"))
     c      = rl_canvas.Canvas(filename, pagesize=landscape(letter))
     gen_dt = datetime.now()
@@ -183,7 +200,7 @@ def generate_simple_roster_pdf(location_name: str, subtitle: str,
         return _draw_page_header(c, location_name, subtitle, gen_dt, visitor_count)
 
     cursor_y  = new_page(is_first=True)
-    cursor_y  = _draw_column_headers(c, cursor_y, SR_COL_WIDTHS, SR_HEADERS)
+    cursor_y  = _draw_column_headers(c, cursor_y, col_widths, headers)
     rows_left = rows_per_page
     page_num  = 1
     row_index = 0
@@ -193,7 +210,7 @@ def generate_simple_roster_pdf(location_name: str, subtitle: str,
             _draw_page_footer(c, page_num)
             page_num  += 1
             cursor_y   = new_page(is_first=False)
-            cursor_y   = _draw_column_headers(c, cursor_y, SR_COL_WIDTHS, SR_HEADERS)
+            cursor_y   = _draw_column_headers(c, cursor_y, col_widths, headers)
             rows_left  = rows_per_page
             row_index  = 0
 
@@ -205,7 +222,7 @@ def generate_simple_roster_pdf(location_name: str, subtitle: str,
         grade    = _resolve_grade(person.get("grade", ""), bday_raw)
         apt      = _extract_apt(addr)
         addr_d   = _street_only(addr)
-        attend   = person.get("attendance", "")
+        col8     = _extract_route_number(person.get("route", "")) if show_route else person.get("attendance", "")
         is_v     = person.get("is_visitor", False)
 
         grade_warn = _is_minor(bday_raw) and not grade
@@ -213,11 +230,21 @@ def generate_simple_roster_pdf(location_name: str, subtitle: str,
                 grade_warn, False, False, _is_bad_address(addr)]
 
         cursor_y  = _draw_data_row(c, cursor_y,
-                                   ["", fn, ln, bday, ph, grade, apt, attend, addr_d],
+                                   ["", fn, ln, bday, ph, grade, apt, col8, addr_d],
                                    row_index, warn, is_visitor=is_v,
-                                   col_widths=SR_COL_WIDTHS)
+                                   col_widths=col_widths)
         rows_left -= 1
         row_index += 1
+
+    # Draw summary tables below the roster (Escuela Dominical only)
+    if show_route and sunday_data:
+        n_routes  = len(Counter(p.get("route", "") for p in attendees if p.get("route", "")))
+        needed    = escuela_summary_height(len(sunday_data), n_routes)
+        if cursor_y - MARGIN < needed:
+            _draw_page_footer(c, page_num)
+            page_num += 1
+            cursor_y  = new_page(is_first=False)
+        _draw_escuela_summary(c, cursor_y, attendees, sunday_data)
 
     _draw_page_footer(c, page_num)
     c.save()

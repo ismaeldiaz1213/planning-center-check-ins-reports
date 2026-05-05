@@ -34,6 +34,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "12935 TX-249, APT 102, Houston, TX, 77086",
         "is_visitor": False,          "attendance": "5/5",
+        "route": "Ruta 1 - Bus",      "is_helper": False,
     },
     {
         "person_id": "2",
@@ -42,6 +43,7 @@ MOCK_ATTENDEES = [
         "grade": "4°",
         "address": "12935 TX-249, APT 204, Houston, TX, 77086",
         "is_visitor": False,          "attendance": "4/5",
+        "route": "Ruta 1 - Bus",      "is_helper": False,
     },
     {
         "person_id": "3",
@@ -50,6 +52,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "12935 TX-249, APT 506, Houston, TX, 77086",
         "is_visitor": False,          "attendance": "3/5",
+        "route": "Ruta 2 - Van",      "is_helper": False,
     },
     # Complex 2 — 430 Cypress Creek Pkwy (two units)
     {
@@ -59,6 +62,7 @@ MOCK_ATTENDEES = [
         "grade": "5°",
         "address": "430 Cypress Creek Pkwy, 46, Houston, TX, 77090",
         "is_visitor": False,          "attendance": "5/5",
+        "route": "Ruta 2 - Van",      "is_helper": False,
     },
     {
         "person_id": "5",
@@ -67,7 +71,9 @@ MOCK_ATTENDEES = [
         "grade": "",                  # minor with no grade → yellow
         "address": "430 Cypress Creek Pkwy, 46, Houston, TX, 77090",
         "is_visitor": False,          "attendance": "2/5",
+        "route": "Ruta 2 - Van",      "is_helper": False,
     },
+    # Helper (age 16+, attends Junta de Rutas) — filtered out of Escuela roster
     {
         "person_id": "6",
         "first_name": "Ingrid",       "last_name": "Rivero",
@@ -75,6 +81,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "430 Cypress Creek Pkwy, 13A, Houston, TX, 77090",
         "is_visitor": False,          "attendance": "5/5",
+        "route": "",                  "is_helper": True,
     },
     # New visitors this week — visitor icon, 165 West Road
     {
@@ -84,6 +91,8 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "165 West Road, Apt 41B, Houston, TX, 77037",
         "is_visitor": True,           "attendance": "1/5",
+        "route": "Ruta 1 - Bus",      "is_helper": False,
+        "created_at": "2026-05-01T00:00:00Z",   # added this week → visitor
     },
     {
         "person_id": "8",
@@ -92,6 +101,8 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "165 West Road, Apt 41B, Houston, TX, 77037",
         "is_visitor": True,           "attendance": "1/5",
+        "route": "Ruta 1 - Bus",      "is_helper": False,
+        "created_at": "2026-05-01T00:00:00Z",   # added this week → visitor
     },
     # Single-family — 20608 I-45
     {
@@ -101,6 +112,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "20608 I-45, Spring, TX, 77373",
         "is_visitor": False,          "attendance": "4/5",
+        "route": "Ruta 3 - Carro",    "is_helper": False,
     },
     # Bad/missing address → yellow highlight
     {
@@ -110,6 +122,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "Houston, TX",
         "is_visitor": False,          "attendance": "3/5",
+        "route": "",                  "is_helper": False,
     },
     # Missing phone AND birthday → yellow on both cells
     {
@@ -119,6 +132,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "8510 Spring Cypress Rd, Spring, TX, 77379",
         "is_visitor": False,          "attendance": "2/5",
+        "route": "Ruta 3 - Carro",    "is_helper": False,
     },
     # Toddlers — age-based grade labels (Nursery / 3 años / 4 años)
     {
@@ -128,6 +142,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "8510 Spring Cypress Rd, Spring, TX, 77379",
         "is_visitor": False,          "attendance": "5/5",
+        "route": "Ruta 2 - Van",      "is_helper": False,
     },
     {
         "person_id": "13",
@@ -136,6 +151,7 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "8510 Spring Cypress Rd, Apt 8B, Spring, TX, 77379",
         "is_visitor": False,          "attendance": "1/5",
+        "route": "Ruta 1 - Bus",      "is_helper": False,
     },
     {
         "person_id": "14",
@@ -144,7 +160,16 @@ MOCK_ATTENDEES = [
         "grade": "",
         "address": "8510 Spring Cypress Rd, Apt 8B, Spring, TX, 77379",
         "is_visitor": False,          "attendance": "5/5",
+        "route": "Ruta 2 - Van",      "is_helper": False,
     },
+]
+
+MOCK_SUNDAY_DATA = [
+    {"label": "Abr 6",  "regular":  9, "visitors": 2},
+    {"label": "Abr 13", "regular":  8, "visitors": 0},
+    {"label": "Abr 20", "regular": 10, "visitors": 1},
+    {"label": "Abr 27", "regular":  7, "visitors": 0},
+    {"label": "May 4",  "regular": 11, "visitors": 3},
 ]
 
 THEMES_AVAILABLE = [None, "primavera", "verano", "otono", "invierno"]
@@ -167,9 +192,11 @@ def main():
     )
     parser.add_argument(
         "--type",
-        choices=["roster", "direcciones", "both"],
-        default="both",
-        help="Which PDF type to generate (default: both)",
+        choices=["roster", "escuela", "direcciones", "both", "all"],
+        default="all",
+        help="Which PDF type to generate (default: all). "
+             "'roster'=Rutas alphabetical, 'escuela'=Escuela Dominical with route column, "
+             "'direcciones'=address-grouped, 'both'=roster+direcciones, 'all'=all three",
     )
     parser.add_argument(
         "--open",
@@ -197,13 +224,23 @@ def main():
         label = THEME_LABELS[theme_key]
         print(f"\n── {label} ──")
 
-        if args.type in ("roster", "both"):
+        if args.type in ("roster", "both", "all"):
             path = os.path.join(out_dir, f"{slug}_Roster.pdf")
             generate_simple_roster_pdf("Ruta 1 - Bus", "Ministerio de Autobuses", MOCK_ATTENDEES, path)
             print(f"  ✓ {os.path.basename(path)}")
             generated.append(path)
 
-        if args.type in ("direcciones", "both"):
+        if args.type in ("escuela", "all"):
+            # Escuela Dominical: helpers stay on roster (route already blank on their records)
+            path = os.path.join(out_dir, f"{slug}_Escuela-Roster.pdf")
+            generate_simple_roster_pdf(
+                "Clase Primaria", "Escuela Dominical", MOCK_ATTENDEES, path,
+                show_route=True, sunday_data=MOCK_SUNDAY_DATA,
+            )
+            print(f"  ✓ {os.path.basename(path)}")
+            generated.append(path)
+
+        if args.type in ("direcciones", "both", "all"):
             path = os.path.join(out_dir, f"{slug}_Direcciones-Roster.pdf")
             generate_address_pdf("Ruta 1 - Bus", MOCK_ATTENDEES, path)
             print(f"  ✓ {os.path.basename(path)}")

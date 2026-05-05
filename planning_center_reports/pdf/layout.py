@@ -148,6 +148,90 @@ def _draw_page_header(c, title: str, subtitle: str, gen_dt, visitor_count: int =
     return rule_y - 4
 
 
+_SUMMARY_ROW_H   = 13   # row height inside summary tables
+_SUMMARY_LABEL_H = 20   # vertical space consumed by the "Resumen" section label
+_SUMMARY_PADDING = 6    # gap below the tables
+
+
+def escuela_summary_height(n_sundays: int, n_routes: int) -> int:
+    """Return the total vertical space (pts) consumed by _draw_escuela_summary.
+
+    Used by rosters.py to decide whether the summary fits on the current page
+    before actually drawing it.
+    """
+    table_rows = max(n_sundays, n_routes) + 1  # data rows + header row
+    return _SUMMARY_LABEL_H + table_rows * _SUMMARY_ROW_H + _SUMMARY_PADDING
+
+
+def _draw_escuela_summary(c, y: float, attendees: list, sunday_data: list) -> float:
+    """Draw the Escuela Dominical attendance summary block below the roster.
+
+    Renders a section label followed by two side-by-side tables:
+      Left  — per-Sunday attendance: Domingo | Regular | Visitantes | Total
+      Right — per-route headcount:   Ruta    | Presentes
+
+    Returns the Y coordinate immediately below the block.
+    """
+    from collections import Counter
+
+    route_counts = sorted(
+        Counter(p.get("route", "") for p in attendees if p.get("route", "")).items()
+    )
+
+    # Section label
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(T("subtitle"))
+    c.drawString(MARGIN, y - 12, "Resumen de Asistencia")
+    y -= _SUMMARY_LABEL_H
+
+    L_COLS = [110, 55, 60, 45]
+    L_HDRS = ["Domingo", "Regular", "Visitantes", "Total"]
+    R_COLS = [150, 55]
+    R_HDRS = ["Ruta", "Presentes"]
+
+    RH  = _SUMMARY_ROW_H
+    GAP = 20
+    lx  = MARGIN
+    rx  = MARGIN + sum(L_COLS) + GAP
+
+    def _row(x, row_y, cols, vals, header=False, idx=0):
+        if header:
+            c.setFillColor(T("col_header"))
+        else:
+            c.setFillColor(WHITE if idx % 2 == 0 else T("row_alt"))
+        c.rect(x, row_y - RH, sum(cols), RH, fill=1, stroke=0)
+        c.setStrokeColor(GREY_LINE)
+        c.setLineWidth(0.25)
+        c.rect(x, row_y - RH, sum(cols), RH, fill=0, stroke=1)
+        c.setFont("Helvetica-Bold" if header else "Helvetica", 7)
+        c.setFillColor(WHITE if header else colors.black)
+        cx = x
+        for val, cw in zip(vals, cols):
+            c.drawString(cx + 3, row_y - RH + 4, str(val) if val is not None else "")
+            cx += cw
+        cx = x
+        for cw in cols[:-1]:
+            cx += cw
+            c.setStrokeColor(GREY_LINE)
+            c.setLineWidth(0.25)
+            c.line(cx, row_y, cx, row_y - RH)
+        return row_y - RH
+
+    ly = y
+    ly = _row(lx, ly, L_COLS, L_HDRS, header=True)
+    for i, row in enumerate(sunday_data):
+        reg = row.get("regular", 0)
+        vis = row.get("visitors", 0)
+        ly  = _row(lx, ly, L_COLS, [row.get("label", ""), reg, vis, reg + vis], idx=i)
+
+    ry = y
+    ry = _row(rx, ry, R_COLS, R_HDRS, header=True)
+    for i, (route_name, count) in enumerate(route_counts):
+        ry = _row(rx, ry, R_COLS, [route_name, count], idx=i)
+
+    return min(ly, ry) - _SUMMARY_PADDING
+
+
 def _draw_page_footer(c, page_num: int):
     """Draw the footer: Bible verse, visitor legend, and page number."""
     c.setFont("Helvetica-Oblique", 7)

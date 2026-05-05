@@ -29,7 +29,9 @@ class Attendee(TypedDict, total=False):
     grade:      str          # display string e.g. "5°", "Nursery"
     created_at: str          # ISO-8601 datetime from PCO
     is_visitor: bool         # True if added to PCO within the last 7 days
-    attendance: str          # display string e.g. "3/5"
+    attendance: str          # display string e.g. "3/5" (deprecated — use route)
+    route:      str          # bus route name e.g. "Ruta 1 - Bus" (for Escuela Dominical)
+    is_helper:  bool         # True if age 16+ and checked into Junta de Rutas
 
 
 # ── Date / display helpers ────────────────────────────────────────────────────
@@ -164,6 +166,34 @@ def _complex_key(address: str) -> str:
     )
     parts = [p.strip() for p in cleaned.split(",")]
     return parts[0].lower() if parts else address.lower()
+
+
+def _is_visitor_for_period(created_at_str: str, starts_at_str: str) -> bool:
+    """Return True if a person was added to PCO within 7 days before a given period.
+
+    Both arguments are ISO-8601 strings (UTC).  Returns False when either is
+    missing or unparseable — no data means we cannot call them a visitor.
+    """
+    if not created_at_str or not starts_at_str:
+        return False
+    try:
+        created_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+        period_dt  = datetime.fromisoformat(starts_at_str.replace("Z", "+00:00"))
+        delta = (period_dt - created_dt).days
+        return 0 <= delta < 7
+    except Exception:
+        return False
+
+
+def _extract_route_number(route: str) -> str:
+    """Return just the numeric part of a route name.
+
+    "Ruta 1 - Bus" → "1", "Ruta 12" → "12", "" → ""
+    """
+    if not route:
+        return ""
+    m = re.search(r"\d+", route)
+    return m.group(0) if m else route
 
 
 def _street_only(address: str) -> str:

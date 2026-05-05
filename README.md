@@ -7,9 +7,10 @@ Automatically generates PDF rosters from Planning Center check-ins and uploads t
 ## Features
 
 - 📋 **Two roster types per bus route** — an address-grouped PDF for bus secretaries and a clean alphabetical roster for drivers
-- 🏫 **Sunday school rosters** — one per class, alphabetical with grade and attendance info
+- 🏫 **Sunday school rosters** — one per class with grade, attendance rate, and route column showing which bus each child rides
+- 📈 **Attendance summary tables** at the bottom of each Sunday school roster — per-Sunday regular/visitor counts and a per-route headcount
 - 🟡 **Yellow highlights** for missing data (phone, birthday, address, grade) so staff know what needs updating
-- 🟠 **Visitor dot** — gold circle marks people added to PCO within the last 7 days
+- 🟠 **Visitor dot** — gold circle marks people added to PCO within the last 7 days; visitor status is recalculated per Sunday for historical accuracy
 - 📊 **Attendance rate** — shows how many of the last N weeks each person attended (e.g. `3/5`)
 - 🎨 **Campaign themes** — seasonal colour schemes for special events
 - ☁️ **Fully automated** via Google Cloud Run + Cloud Scheduler
@@ -39,13 +40,14 @@ planning-center-check-ins-reports/
 │   ├── test_formatting.py         #   Birthday / date formatting
 │   ├── test_address_parsing.py    #   Apartment extraction, street normalisation
 │   ├── test_grade_logic.py        #   Age calculation, grade resolution
-│   └── test_attendance.py         #   Check-in deduplication, attendance counting
+│   ├── test_attendance.py         #   Check-in deduplication, attendance counting
+│   ├── test_helpers_and_routes.py #   Helper identification, route mapping, suppression
+│   └── test_escuela_dominical.py  #   Route number extraction, visitor-per-period, summary tables
 │
 ├── .github/workflows/ci.yml       # GitHub Actions CI — runs on every push
 ├── pyproject.toml                 # ruff + pytest configuration
 ├── requirements.txt               # Production dependencies
 ├── requirements-dev.txt           # Dev tools: pytest, ruff
-├── DEVELOPMENT.md                 # Developer guide: testing, deploying, CI
 │
 ├── ibl_logo.png                   # Church logo used in all PDFs
 ├── assets/                        # Theme image assets (baked into Docker image)
@@ -80,7 +82,9 @@ Each class location receives:
 
 | File | Description |
 |------|-------------|
-| `Roster.pdf` | Alphabetical roster with grade, attendance rate, and visitor indicators. |
+| `Roster.pdf` | Alphabetical roster with grade, bus route number, attendance rate, and visitor indicators. Includes attendance summary tables at the bottom showing per-Sunday regular/visitor counts and a per-route headcount. |
+
+Bus workers (helpers age 16+ from Junta de Rutas Attendance) appear on the roster with a blank Ruta column — they are present but not counted toward route totals.
 
 ### Column Reference
 
@@ -92,6 +96,7 @@ Each class location receives:
 | Teléfono | Primary phone number |
 | Grado | PCO grade field; auto-filled as Nursery / 3 años / 4 años for children under 5 |
 | Apto. | Apartment number extracted from address |
+| Ruta | Bus route number (e.g. `1`, `2`) — Escuela Dominical rosters only; blank for helpers |
 | Asist. | Attendance rate over the selected window (e.g. `4/5`) |
 | Dirección | Street address without apartment number |
 
@@ -131,8 +136,7 @@ pip install -r requirements-dev.txt   # first time only
 pytest
 ```
 
-68 tests cover address parsing, grade logic, date formatting, and the attendance
-deduplication logic. None of them require Planning Center or Google Drive credentials.
+100+ tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, and PDF generation. None of them require Planning Center or Google Drive credentials.
 
 ```bash
 ruff check .   # linter — catches unused imports and style issues
@@ -149,8 +153,11 @@ python preview.py
 # One specific theme
 python preview.py --theme primavera
 
-# Only the simple roster, all themes
+# Only the simple Rutas roster, all themes
 python preview.py --type roster
+
+# Only the Escuela Dominical roster (with route column + summary tables)
+python preview.py --type escuela
 
 # Only the address-grouped PDF for one theme
 python preview.py --type direcciones --theme otono
@@ -161,7 +168,6 @@ python preview.py --open
 
 Output goes to `previews/` in your project folder. Edit `MOCK_ATTENDEES` at the top of `preview.py` to test edge cases like missing fields, toddlers, or visitors.
 
-> See [DEVELOPMENT.md](DEVELOPMENT.md) for the full developer workflow, including how CI works and where to look when a test fails.
 
 ---
 

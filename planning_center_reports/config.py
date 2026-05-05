@@ -53,6 +53,11 @@ HEADERS_ES = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Ap
 SR_COL_WIDTHS = [16, 100, 100, 65, 95, 44, 44, 36, 220]
 SR_HEADERS    = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Asist.", "Dirección"]
 
+# Escuela Dominical roster — replaces Asist. (attendance) with Ruta (bus route).
+# Used when displaying Escuela Dominical rosters with route information.
+ED_COL_WIDTHS = [16, 100, 100, 65, 95, 44, 44, 50, 206]
+ED_HEADERS    = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Ruta", "Dirección"]
+
 # ── Fixed colours (never change with theme) ───────────────────────────────────
 WHITE       = colors.white
 GREY_LINE   = colors.HexColor("#CCCCCC")
@@ -68,6 +73,11 @@ MESES_ES = {
     1: "enero",     2: "febrero",   3: "marzo",     4: "abril",
     5: "mayo",      6: "junio",     7: "julio",      8: "agosto",
     9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre",
+}
+
+MESES_ABREV = {
+    1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
+    7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic",
 }
 
 # ── Colour palettes ───────────────────────────────────────────────────────────

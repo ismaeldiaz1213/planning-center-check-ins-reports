@@ -12,6 +12,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.3.0] — 2026-05-05
+
+### Added
+- **Escuela Dominical roster improvements**
+  - New **Ruta column** replaces the Asistencia column — shows only the route number (e.g. `1`, `2`) instead of the full route name. Implemented via `_extract_route_number()` in `models.py`.
+  - **Attendance summary tables** printed below the attendee list on each roster: a per-Sunday table (Domingo | Regular | Visitantes | Total) and a per-route headcount table (Ruta | Presentes). Driven by `_draw_escuela_summary()` in `pdf/layout.py` and `escuela_summary_height()` for page-break decisions.
+  - `generate_simple_roster_pdf` accepts a new `show_route` flag and optional `sunday_data` list for the summary.
+- **`ED_COL_WIDTHS` / `ED_HEADERS`** constants in `config.py` for the wider Escuela Dominical column layout.
+- **`MESES_ABREV`** Spanish month abbreviation map in `config.py`.
+- **`get_helpers_set()`** in `pco_client.py` — fetches person IDs (age ≥ 16) who checked into *Junta de Rutas Attendance*, used to identify bus workers.
+- **`_get_route_mapping()`** in `services.py` — builds a `person_id → route_name` map from Rutas check-ins, used to populate the Ruta column in Escuela Dominical rosters.
+- **`_build_sunday_data()`** in `services.py` — counts per-Sunday regular and visitor attendees for one class location. Visitor status is evaluated **per Sunday** using each person's `created_at` and the period's `starts_at`, not against today's date.
+- **`_is_visitor_for_period()`** in `models.py` — returns `True` if a person was added to PCO within 7 days before a given event period.
+- **`_format_period_date()`** in `pco_client.py` — formats a PCO `starts_at` ISO string into a short Spanish label (e.g. `"Abr 6"`).
+- **Rate-limit retry** added to `get_checkins_for_event_periods()` — the paginator now retries up to 7 times with exponential back-off on HTTP 429 and network errors, matching the behaviour of `get_person_details`.
+- **`preview.py` Escuela Dominical preview** — `--type escuela` (included in the default `all`) generates `*_Escuela-Roster.pdf` with mock Sunday summary data and a helper attendee to exercise all new code paths.
+- **Test suite expanded** — 30 new tests in `tests/test_escuela_dominical.py` covering `_extract_route_number`, `_is_visitor_for_period`, `_format_period_date`, `_build_sunday_data` (including per-period visitor determination), `escuela_summary_height`, and `generate_simple_roster_pdf` with Escuela Dominical flags. Additional tests in `test_helpers_and_routes.py` verify helper route suppression and roster inclusion.
+
+### Changed
+- **`get_recent_event_periods()`** now returns a 3-tuple `(period_ids, period_dates, period_starts_at)`. The new third element maps each period ID to its raw ISO `starts_at` string, used for per-Sunday visitor calculations.
+- **Bus workers (helpers) remain on the Escuela Dominical roster** — previously they were filtered out; now they appear on the list with a blank Ruta cell. Route assignment is suppressed in `_build_attendees` when a person is in `helpers_set`.
+- **`run_escuela_dominical` docstring** updated to reflect current behaviour.
+
+### Fixed
+- **Per-Sunday visitor counts** were previously based on today's date (anyone added within the last 7 days from now). For historical Sundays, this misclassified people who were new weeks ago as regulars. Visitor status is now computed relative to each period's actual date.
+- **HTTP 429 crash** in `get_checkins_for_event_periods` — the Escuela Dominical job makes three API calls to this function sequentially (helpers, route mapping, class check-ins); the third call could hit PCO's rate limit and raise immediately. The paginator now retries automatically.
+
+---
+
 ## [2.2.0] — 2026-05-02
 
 Major internal restructuring. Behaviour and PDF output are unchanged — this
