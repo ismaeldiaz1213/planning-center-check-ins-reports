@@ -1,0 +1,39 @@
+.footer {
+  background: var(--navy);
+  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 20px 24px;
+  gap: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 16px;
+}
+
+.logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  opacity: 0.92;
+}
+
+.name {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.2px;
+}
+
+.sub {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.copy {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.38);
+  margin-top: 10px;
+  text-align: center;
+}

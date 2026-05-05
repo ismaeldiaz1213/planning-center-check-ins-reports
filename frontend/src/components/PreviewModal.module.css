@@ -1,0 +1,114 @@
+.tabs {
+  display: flex;
+  padding: 0 16px;
+  border-bottom: 2px solid var(--border);
+  background: var(--blue-pale);
+  flex-shrink: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  background: none;
+  border: none;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.tab:hover    { color: var(--navy); }
+
+.tabActive {
+  color: var(--navy);
+  font-weight: 700;
+  border-bottom-color: var(--navy);
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.typeGroup {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.typeBtn {
+  background: var(--blue-pale);
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.typeBtn:hover          { border-color: var(--blue-mid); color: var(--navy); }
+.typeBtnActive          { background: var(--navy); border-color: var(--navy); color: #fff; font-weight: 700; }
+
+.genGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.viewer {
+  flex: 1;
+  padding: 12px 16px;
+  overflow: hidden;
+  min-height: 0;   /* allow flex child to shrink */
+  display: flex;
+  flex-direction: column;
+}
+
+.iframe {
+  flex: 1;
+  width: 100%;
+  min-height: 300px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  min-height: 200px;
+  text-align: center;
+}
+
+.emptyHint {
+  font-size: 12.5px;
+  color: #94A3B8;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  .controls { gap: 8px; }
+  .iframe   { min-height: 220px; }
+  .tabs     { padding: 0 10px; }
+}

@@ -12,6 +12,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.4.0] — 2026-05-05
+
+Codebase split into `backend/` and `frontend/` directories. Experimental web UI
+added for testing — the Cloud Run pipeline and `manage.sh` workflow are
+unchanged for production use.
+
+### Changed
+- All Python source moved to `backend/` (`planning_center_reports/`, `tests/`,
+  `assets/`, `previews/`, `main.py`, `preview.py`, and supporting files).
+- `Dockerfile` updated to reference `backend/` paths; still builds a Python-only
+  Cloud Run job image — no frontend included.
+- `backend/requirements.txt` reverted to core deps only (no FastAPI/uvicorn).
+- `backend/requirements-web.txt` added for the optional API server.
+- `manage.sh` option 6 path check updated for the new layout.
+- CI workflow split into separate `backend` and `frontend` jobs.
+
+### Added
+- `backend/api.py` — FastAPI server for the web UI (local / future hosting).
+  Provides `GET /api/previews`, `POST /api/previews/generate`, job run and poll
+  endpoints. Not used by or required for the Cloud Run jobs.
+- `frontend/` — React + TypeScript (Vite) web UI for testing. Spanish/English
+  toggle, dashboard tile grid, PDF preview viewer, live job output. Work in
+  progress; not yet in production.
+
+---
+
 ## [2.3.0] — 2026-05-05
 
 ### Added

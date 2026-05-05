@@ -1,0 +1,46 @@
+/* Global reset and design tokens */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --navy:        #0D2D4F;
+  --blue-dark:   #1A4A7A;
+  --blue-mid:    #2562A8;
+  --blue-light:  #5B9BD5;
+  --blue-pale:   #E8F2FC;
+  --blue-bg:     #F0F7FF;
+  --white:       #FFFFFF;
+  --text:        #0D2D4F;
+  --text-muted:  #4A6080;
+  --border:      #C3DEFF;
+  --success:     #166534;
+  --success-bg:  #DCFCE7;
+  --error:       #991B1B;
+  --error-bg:    #FEE2E2;
+  --running:     #1E40AF;
+  --running-bg:  #DBEAFE;
+  --radius:      10px;
+  --shadow:      0 2px 10px rgba(13, 45, 79, 0.12);
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: var(--blue-bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Prevent horizontal overflow on mobile */
+html, body { overflow-x: hidden; }
+
+/* Scrollbar styling for terminals */
+.terminal::-webkit-scrollbar        { width: 6px; }
+.terminal::-webkit-scrollbar-track  { background: #2A2A2A; }
+.terminal::-webkit-scrollbar-thumb  { background: #555; border-radius: 3px; }

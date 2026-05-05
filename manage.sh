@@ -150,8 +150,8 @@ deploy_script() {
     echo -e "${BOLD}── Deploy Updated Code ──────────────────────────────────────${NC}"
     echo ""
 
-    if [[ ! -f "main.py" ]] || [[ ! -d "planning_center_reports" ]]; then
-        error "Project files not found. Run this from your project folder."
+    if [[ ! -f "backend/main.py" ]] || [[ ! -d "backend/planning_center_reports" ]]; then
+        error "Project files not found. Run this from the project root folder."
         return
     fi
 

@@ -19,48 +19,43 @@ Automatically generates PDF rosters from Planning Center check-ins and uploads t
 
 ## Project Structure
 
+The codebase is split into `backend/` (Python pipeline + optional API server)
+and `frontend/` (React web UI, work in progress). The Cloud Run jobs and
+`manage.sh` workflow work the same as always — the frontend is independent.
+
 ```
 planning-center-check-ins-reports/
-├── main.py                        # Thin entrypoint — calls the package's CLI
-├── preview.py                     # Local preview tool — generates PDFs with mock data
-├── auto_checkin.py                # Optional: bulk check-in a PCO group to an event
 │
-├── planning_center_reports/       # Main Python package
-│   ├── config.py                  #   Environment variables, layout constants, themes
-│   ├── models.py                  #   Attendee type + pure helper functions (testable)
-│   ├── pco_client.py              #   Planning Center API calls
-│   ├── drive_client.py            #   Google Drive upload logic
-│   ├── services.py                #   Orchestration: fetch → transform → generate → upload
-│   ├── cli.py                     #   argparse entrypoint
-│   └── pdf/
-│       ├── layout.py              #   Low-level ReportLab drawing primitives
-│       └── rosters.py             #   generate_address_pdf, generate_simple_roster_pdf
+├── backend/                       # All Python source
+│   ├── planning_center_reports/   #   Main package
+│   │   ├── config.py              #     Environment variables, layout constants, themes
+│   │   ├── models.py              #     Attendee type + pure helper functions
+│   │   ├── pco_client.py          #     Planning Center API calls
+│   │   ├── drive_client.py        #     Google Drive upload logic
+│   │   ├── services.py            #     Orchestration: fetch → transform → generate → upload
+│   │   ├── cli.py                 #     argparse entrypoint
+│   │   └── pdf/
+│   │       ├── layout.py          #     Low-level ReportLab drawing primitives
+│   │       └── rosters.py         #     generate_address_pdf, generate_simple_roster_pdf
+│   ├── main.py                    #   Cloud Run entrypoint
+│   ├── preview.py                 #   Local preview tool — generates PDFs with mock data
+│   ├── api.py                     #   Optional FastAPI server (for the web UI)
+│   ├── tests/                     #   pytest test suite (121 tests)
+│   ├── requirements.txt           #   Core deps — used by Docker
+│   ├── requirements-web.txt       #   FastAPI + uvicorn — API server only
+│   └── requirements-dev.txt       #   Dev tools: pytest, ruff
 │
-├── tests/                         # Automated test suite (run with pytest)
-│   ├── test_formatting.py         #   Birthday / date formatting
-│   ├── test_address_parsing.py    #   Apartment extraction, street normalisation
-│   ├── test_grade_logic.py        #   Age calculation, grade resolution
-│   ├── test_attendance.py         #   Check-in deduplication, attendance counting
-│   ├── test_helpers_and_routes.py #   Helper identification, route mapping, suppression
-│   └── test_escuela_dominical.py  #   Route number extraction, visitor-per-period, summary tables
+├── frontend/                      # React web UI (WIP — not in production)
 │
-├── .github/workflows/ci.yml       # GitHub Actions CI — runs on every push
-├── pyproject.toml                 # ruff + pytest configuration
-├── requirements.txt               # Production dependencies
-├── requirements-dev.txt           # Dev tools: pytest, ruff
-│
-├── ibl_logo.png                   # Church logo used in all PDFs
-├── assets/                        # Theme image assets (baked into Docker image)
-│   ├── SoccerBall.png             #   Visitor marker for the primavera theme
-│   └── gold_medal.png             #   Campaign header icon for the primavera theme
+├── Dockerfile                     # Cloud Run job image (Python only)
+├── .github/workflows/ci.yml       # GitHub Actions CI — backend lint+test, frontend type-check+build
 ├── credentials.json               # Google service account key (never commit this)
 ├── .env                           # Local credentials (never commit this)
 ├── .env.example                   # Template — copy to .env and fill in
-├── .gcloudignore                  # Tells gcloud what to exclude from builds (.env only)
-├── .gitignore                     # Excludes credentials.json and .env from git
-├── Dockerfile                     # Container definition for Cloud Run
+├── .gcloudignore                  # Tells gcloud what to exclude from builds
+├── .gitignore                     # Excludes credentials.json, .env, build output
 ├── setup_gcloud.sh                # Run ONCE to deploy everything to Google Cloud
-└── manage.sh                      # Day-to-day management (deploy, theme, logs, test)
+├── manage.sh                      # Day-to-day management (deploy, theme, logs, test)
 ```
 
 ---
@@ -129,41 +124,31 @@ Theme image assets live in `assets/`. To add a custom visitor or header icon to 
 
 ## Local Development & Testing
 
+All backend commands run from the `backend/` directory.
+
 ### Running the test suite
 
 ```bash
-pip install -r requirements-dev.txt   # first time only
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt   # first time only
 pytest
 ```
 
-100+ tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, and PDF generation. None of them require Planning Center or Google Drive credentials.
+121 tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, and PDF generation. None require Planning Center or Google Drive credentials.
 
 ```bash
-ruff check .   # linter — catches unused imports and style issues
+ruff check .   # linter — run from backend/
 ```
 
 ### Generating PDF previews
 
-Use `preview.py` to generate sample PDFs without any credentials or live data. All mock data uses Chick-fil-A locations near the church so it is safe to commit publicly.
-
 ```bash
-# Generate all themes × both PDF types (10 files total)
-python preview.py
-
-# One specific theme
-python preview.py --theme primavera
-
-# Only the simple Rutas roster, all themes
-python preview.py --type roster
-
-# Only the Escuela Dominical roster (with route column + summary tables)
-python preview.py --type escuela
-
-# Only the address-grouped PDF for one theme
+cd backend
+python preview.py                          # all themes × all PDF types
+python preview.py --theme primavera        # one theme
+python preview.py --type escuela           # Escuela Dominical only
 python preview.py --type direcciones --theme otono
-
-# Generate and open immediately in your PDF viewer
-python preview.py --open
+python preview.py --open                   # open in PDF viewer after generating
 ```
 
 Output goes to `previews/` in your project folder. Edit `MOCK_ATTENDEES` at the top of `preview.py` to test edge cases like missing fields, toddlers, or visitors.

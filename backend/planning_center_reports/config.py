@@ -10,12 +10,16 @@
 # namespace at call time, not at import time.
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 
-load_dotenv()
+# Search for .env starting from the package → backend/ → project root.
+# This handles: local dev (root .env), Docker (env vars injected, no .env needed).
+load_dotenv(Path(__file__).parent.parent.parent / ".env")  # project root
+load_dotenv(Path(__file__).parent.parent / ".env")         # backend/ (overrides if present)
 
 # ── Credentials (loaded from .env locally; injected as secrets on Cloud Run) ──
 PCO_APP_ID                    = os.getenv("PCO_APP_ID")

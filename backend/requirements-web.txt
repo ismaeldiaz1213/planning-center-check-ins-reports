@@ -1,0 +1,7 @@
+# Extra dependencies for the web API server (api.py).
+# Not needed for the Cloud Run jobs — those only use requirements.txt.
+#
+# Install with:
+#   pip install -r requirements.txt -r requirements-web.txt
+fastapi
+uvicorn[standard]
