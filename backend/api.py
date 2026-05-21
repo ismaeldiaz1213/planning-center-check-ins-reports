@@ -25,13 +25,49 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BACKEND_DIR  = Path(__file__).parent.resolve()   # .../backend/
+PROJECT_DIR  = BACKEND_DIR.parent                # project root
+ENV_PATH     = PROJECT_DIR / ".env"
 PREVIEWS_DIR = BACKEND_DIR / "previews"
 STATIC_DIR   = BACKEND_DIR / "static"
 LOGO_PATH    = BACKEND_DIR / "ibl_logo.png"
+
+# ── .env helpers ───────────────────────────────────────────────────────────────
+
+def _read_dotenv() -> dict[str, str]:
+    result: dict[str, str] = {}
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            result[key.strip()] = val.strip()
+    return result
+
+
+def _write_dotenv(updates: dict[str, str]):
+    existing_lines = ENV_PATH.read_text().splitlines() if ENV_PATH.exists() else []
+    written: set[str] = set()
+    new_lines: list[str] = []
+    for line in existing_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.partition("=")[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}")
+                written.add(key)
+                continue
+        new_lines.append(line)
+    for key, val in updates.items():
+        if key not in written:
+            new_lines.append(f"{key}={val}")
+    ENV_PATH.write_text("\n".join(new_lines) + "\n")
+    for key, val in updates.items():
+        os.environ[key] = val
 
 # ── In-memory job store ────────────────────────────────────────────────────────
 _jobs: dict[str, dict] = {}
@@ -64,6 +100,24 @@ def serve_logo():
 class GenerateRequest(BaseModel):
     theme: Optional[str] = None
     type: Optional[str] = None
+
+
+class RunJobRequest(BaseModel):
+    weeks: Optional[int] = Field(default=None, ge=1, le=52)
+    theme: Optional[str] = None
+
+
+VALID_THEMES = {"primavera", "verano", "otono", "invierno"}
+
+
+class SettingsWrite(BaseModel):
+    pco_app_id: Optional[str] = None
+    pco_secret: Optional[str] = None
+    google_drive_parent_folder_id: Optional[str] = None
+    rutas_weeks: Optional[int] = Field(default=None, ge=1, le=52)
+    rutas_theme: Optional[str] = None
+    escuela_weeks: Optional[int] = Field(default=None, ge=1, le=52)
+    escuela_theme: Optional[str] = None
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -179,19 +233,78 @@ def get_job(job_id: str, since: int = Query(default=0, ge=0)):
     }
 
 
+@app.get("/api/settings")
+def get_settings():
+    """Return current editable settings (reads live env + .env file)."""
+    env = _read_dotenv()
+    def _get(key: str, default: str = "") -> str:
+        return os.environ.get(key) or env.get(key, default)
+    return {
+        "pco_app_id":                  _get("PCO_APP_ID"),
+        "pco_secret":                  _get("PCO_SECRET"),
+        "google_drive_parent_folder_id": _get("GOOGLE_DRIVE_PARENT_FOLDER_ID"),
+        "rutas_weeks":                 int(_get("RUTAS_DEFAULT_WEEKS", "5")),
+        "rutas_theme":                 _get("RUTAS_DEFAULT_THEME", ""),
+        "escuela_weeks":               int(_get("ESCUELA_DEFAULT_WEEKS", "5")),
+        "escuela_theme":               _get("ESCUELA_DEFAULT_THEME", ""),
+    }
+
+
+@app.put("/api/settings")
+def update_settings(body: SettingsWrite):
+    """Persist settings changes to the .env file."""
+    updates: dict[str, str] = {}
+    if body.pco_app_id is not None:
+        updates["PCO_APP_ID"] = body.pco_app_id
+    if body.pco_secret is not None:
+        updates["PCO_SECRET"] = body.pco_secret
+    if body.google_drive_parent_folder_id is not None:
+        updates["GOOGLE_DRIVE_PARENT_FOLDER_ID"] = body.google_drive_parent_folder_id
+    if body.rutas_weeks is not None:
+        updates["RUTAS_DEFAULT_WEEKS"] = str(body.rutas_weeks)
+    if body.rutas_theme is not None:
+        updates["RUTAS_DEFAULT_THEME"] = body.rutas_theme if body.rutas_theme in VALID_THEMES else ""
+    if body.escuela_weeks is not None:
+        updates["ESCUELA_DEFAULT_WEEKS"] = str(body.escuela_weeks)
+    if body.escuela_theme is not None:
+        updates["ESCUELA_DEFAULT_THEME"] = body.escuela_theme if body.escuela_theme in VALID_THEMES else ""
+    if updates:
+        _write_dotenv(updates)
+    return {"ok": True}
+
+
+@app.get("/api/jobs")
+def list_jobs():
+    """Return all jobs sorted newest-first."""
+    with _jobs_lock:
+        jobs = list(_jobs.values())
+    jobs.sort(key=lambda j: j["started_at"], reverse=True)
+    return {"jobs": jobs}
+
+
 @app.post("/api/jobs/rutas/run", status_code=202)
-def run_rutas():
+def run_rutas(req: RunJobRequest = RunJobRequest()):
     """Trigger python main.py Rutas in the background."""
+    weeks = req.weeks or int(os.getenv("RUTAS_DEFAULT_WEEKS", "5"))
+    theme = req.theme or os.getenv("RUTAS_DEFAULT_THEME", "")
+    cmd   = [sys.executable, "main.py", "Rutas", "--weeks", str(weeks)]
+    if theme and theme in VALID_THEMES:
+        cmd += ["--theme", theme]
     job_id = _create_job("rutas")
-    _run_subprocess(job_id, [sys.executable, "main.py", "Rutas"])
+    _run_subprocess(job_id, cmd)
     return {"job_id": job_id}
 
 
 @app.post("/api/jobs/escuela/run", status_code=202)
-def run_escuela():
+def run_escuela(req: RunJobRequest = RunJobRequest()):
     """Trigger python main.py 'Escuela Dominical' in the background."""
+    weeks = req.weeks or int(os.getenv("ESCUELA_DEFAULT_WEEKS", "5"))
+    theme = req.theme or os.getenv("ESCUELA_DEFAULT_THEME", "")
+    cmd   = [sys.executable, "main.py", "Escuela Dominical", "--weeks", str(weeks)]
+    if theme and theme in VALID_THEMES:
+        cmd += ["--theme", theme]
     job_id = _create_job("escuela")
-    _run_subprocess(job_id, [sys.executable, "main.py", "Escuela Dominical"])
+    _run_subprocess(job_id, cmd)
     return {"job_id": job_id}
 
 

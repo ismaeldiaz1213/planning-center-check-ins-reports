@@ -40,7 +40,7 @@ planning-center-check-ins-reports/
 │   ├── main.py                    #   Cloud Run entrypoint
 │   ├── preview.py                 #   Local preview tool — generates PDFs with mock data
 │   ├── api.py                     #   Optional FastAPI server (for the web UI)
-│   ├── tests/                     #   pytest test suite (121 tests)
+│   ├── tests/                     #   pytest test suite (168 tests)
 │   ├── requirements.txt           #   Core deps — used by Docker
 │   ├── requirements-web.txt       #   FastAPI + uvicorn — API server only
 │   └── requirements-dev.txt       #   Dev tools: pytest, ruff
@@ -130,15 +130,17 @@ All backend commands run from the `backend/` directory.
 
 ```bash
 cd backend
-pip install -r requirements.txt -r requirements-dev.txt   # first time only
+pip install -r requirements.txt -r requirements-web.txt -r requirements-dev.txt   # first time only
 pytest
 ```
 
-121 tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, and PDF generation. None require Planning Center or Google Drive credentials.
+168 tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, PDF generation, and the full API layer (settings, job store, run endpoints, .env helpers). None require Planning Center or Google Drive credentials.
 
 ```bash
 ruff check .   # linter — run from backend/
 ```
+
+For the full testing guide (including frontend tests), see [DEPLOYMENT.md](DEPLOYMENT.md#running-the-test-suites).
 
 ### Generating PDF previews
 

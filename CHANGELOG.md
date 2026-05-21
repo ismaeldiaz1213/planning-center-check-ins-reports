@@ -8,7 +8,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-> Changes staged for the next release go here.
+### Added
+
+**Web UI**
+- **Settings modal** — editable form for PCO credentials (`PCO_APP_ID`, `PCO_SECRET`),
+  Google Drive folder ID, and per-job defaults (weeks, campaign theme) for both Rutas and
+  Escuela Dominical. Changes are persisted to the `.env` file immediately.
+- **Logs modal** — displays all in-session jobs newest-first as expandable cards showing
+  type, status badge, relative time, duration, and collapsible terminal output. Refresh
+  button re-fetches the list.
+- **Settings and Logs tiles** activated on the dashboard (previously "Coming Soon").
+
+**Backend API (`api.py`)**
+- `GET /api/settings` — returns all editable settings from env / `.env` file.
+- `PUT /api/settings` — persists setting changes to `.env` and updates the live process env.
+- `GET /api/jobs` — lists all in-session jobs sorted newest-first.
+- `POST /api/jobs/rutas/run` and `POST /api/jobs/escuela/run` now pass `--weeks` and
+  `--theme` flags to `main.py`, reading defaults from `RUTAS_DEFAULT_WEEKS`,
+  `RUTAS_DEFAULT_THEME`, `ESCUELA_DEFAULT_WEEKS`, `ESCUELA_DEFAULT_THEME` env vars
+  (all default to sane values when unset).
+- `.env` read/write helpers (`_read_dotenv`, `_write_dotenv`) with line-preserving update logic.
+
+**Internationalisation**
+- Added translation keys for all five season theme tabs (`preview.theme.*`) and three PDF
+  type buttons (`preview.type.*`) in the Preview modal — previously hardcoded English strings.
+- Added translation keys for the Settings modal (sections, field labels, save states) and
+  Logs modal (title, job type labels, empty/output strings) in both Spanish and English.
+
+**Tests**
+- `backend/tests/test_api.py` — 47 new backend tests covering all API endpoints, the
+  `.env` helpers, job store behaviour, run-job flag construction, settings read/write, and
+  edge cases. Backend total: **168 tests**.
+- `frontend/src/components/__tests__/` — full React component test suite using
+  **Vitest 4 + Testing Library** (jsdom environment). Tests for Footer, Navbar, StatusBadge,
+  TileCard, HomePage, PreviewModal, JobModal, SettingsModal, and LogsModal.
+  Frontend total: **69 tests**.
+- `frontend/vitest.config.ts` and `frontend/src/test/setup.ts` — test runner configuration.
+- Added `npm test` / `npm run test:watch` scripts to `frontend/package.json`.
+- Added `httpx` to `backend/requirements-dev.txt` (required by FastAPI's `TestClient`).
+
+### Changed
+- **PDF Preview modal** enlarged: max-width `920 px → 1400 px`, max-height `90 vh → 95 vh`,
+  overlay padding `16 px → 8 px` so the viewer takes up much more of the screen.
+- **Footer** — copyright line (`© year … All rights reserved.`) removed; this is an open
+  source project.
 
 ---
 

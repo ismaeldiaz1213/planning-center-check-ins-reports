@@ -52,12 +52,53 @@ export const strings = {
   'job.placeholder':     { en: 'Press Run to start…',      es: 'Presiona Ejecutar para comenzar…' },
 
   // ── Preview modal ────────────────────────────────────────────────────────────
-  'preview.title':       { en: 'PDF Previews',             es: 'Vista Previa de PDFs' },
-  'preview.regenerate':  { en: 'Regenerate',               es: 'Regenerar' },
-  'preview.generating':  { en: 'Generating…',              es: 'Generando…' },
-  'preview.empty':       { en: 'No PDF found for',         es: 'No se encontró PDF para' },
-  'preview.emptyHint':   { en: 'Click Regenerate to create it.',
-                           es: 'Haz clic en Regenerar para crearlo.' },
+  'preview.title':               { en: 'PDF Previews',             es: 'Vista Previa de PDFs' },
+  'preview.regenerate':          { en: 'Regenerate',               es: 'Regenerar' },
+  'preview.generating':          { en: 'Generating…',              es: 'Generando…' },
+  'preview.empty':               { en: 'No PDF found for',         es: 'No se encontró PDF para' },
+  'preview.emptyHint':           { en: 'Click Regenerate to create it.',
+                                   es: 'Haz clic en Regenerar para crearlo.' },
+
+  // Preview — seasons (theme tabs)
+  'preview.theme.default':       { en: 'Default',    es: 'Predeterminado' },
+  'preview.theme.primavera':     { en: 'Primavera',  es: 'Primavera'      },
+  'preview.theme.verano':        { en: 'Verano',     es: 'Verano'         },
+  'preview.theme.otono':         { en: 'Otoño',      es: 'Otoño'          },
+  'preview.theme.invierno':      { en: 'Invierno',   es: 'Invierno'       },
+
+  // Preview — pdf type buttons
+  'preview.type.roster':         { en: 'Roster',       es: 'Roster'       },
+  'preview.type.escuela':        { en: 'Escuela',      es: 'Escuela'      },
+  'preview.type.direcciones':    { en: 'Direcciones',  es: 'Direcciones'  },
+
+  // ── Settings modal ───────────────────────────────────────────────────────────
+  'settings.title':              { en: 'Edit Settings',               es: 'Editar Configuración'          },
+  'settings.section.creds':      { en: 'PCO Credentials',             es: 'Credenciales PCO'              },
+  'settings.pco_app_id':         { en: 'PCO App ID',                  es: 'ID de App PCO'                 },
+  'settings.pco_secret':         { en: 'PCO Secret',                  es: 'Secreto PCO'                   },
+  'settings.section.drive':      { en: 'Google Drive',                es: 'Google Drive'                  },
+  'settings.drive_folder':       { en: 'Parent Folder ID',            es: 'ID de Carpeta Padre'           },
+  'settings.section.rutas':      { en: 'Rutas Job Defaults',          es: 'Valores por Defecto – Rutas'   },
+  'settings.section.escuela':    { en: 'Escuela Dominical Defaults',  es: 'Valores por Defecto – Escuela' },
+  'settings.weeks':              { en: 'Recent weeks to include',     es: 'Semanas recientes a incluir'   },
+  'settings.theme':              { en: 'Campaign theme',              es: 'Tema de campaña'               },
+  'settings.theme.none':         { en: 'None (default)',              es: 'Ninguno (predeterminado)'      },
+  'settings.save':               { en: 'Save',                        es: 'Guardar'                       },
+  'settings.saving':             { en: 'Saving…',                     es: 'Guardando…'                    },
+  'settings.saved':              { en: 'Saved!',                      es: '¡Guardado!'                    },
+  'settings.error':              { en: 'Failed to save settings.',    es: 'Error al guardar la configuración.' },
+
+  // ── Logs modal ────────────────────────────────────────────────────────────────
+  'logs.title':                  { en: 'Job Logs',                    es: 'Registros de Trabajos'         },
+  'logs.refresh':                { en: 'Refresh',                     es: 'Actualizar'                    },
+  'logs.empty':                  { en: 'No jobs have been run yet.',  es: 'No se han ejecutado trabajos aún.' },
+  'logs.type.rutas':             { en: 'Rutas',                       es: 'Rutas'                         },
+  'logs.type.escuela':           { en: 'Escuela Dominical',           es: 'Escuela Dominical'             },
+  'logs.type.preview':           { en: 'Preview',                     es: 'Vista Previa'                  },
+  'logs.started':                { en: 'Started',                     es: 'Iniciado'                      },
+  'logs.duration':               { en: 'Duration',                    es: 'Duración'                      },
+  'logs.output':                 { en: 'Output',                      es: 'Salida'                        },
+  'logs.noOutput':               { en: 'No output.',                  es: 'Sin salida.'                   },
 
   // ── Status badge ─────────────────────────────────────────────────────────────
   'status.idle':         { en: 'Idle',                     es: 'Inactivo' },

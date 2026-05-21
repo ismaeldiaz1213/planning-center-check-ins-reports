@@ -11,19 +11,8 @@ interface Props {
   onClose: () => void
 }
 
-const THEMES = [
-  { key: 'default',   label: 'Default'   },
-  { key: 'primavera', label: 'Primavera' },
-  { key: 'verano',    label: 'Verano'    },
-  { key: 'otono',     label: 'Otoño'     },
-  { key: 'invierno',  label: 'Invierno'  },
-]
-
-const PDF_TYPES = [
-  { key: 'roster',      label: 'Roster'      },
-  { key: 'escuela',     label: 'Escuela'     },
-  { key: 'direcciones', label: 'Direcciones' },
-]
+const THEME_KEYS = ['default', 'primavera', 'verano', 'otono', 'invierno'] as const
+const PDF_TYPE_KEYS = ['roster', 'escuela', 'direcciones'] as const
 
 export default function PreviewModal({ onClose }: Props) {
   const { t }                               = useLanguage()
@@ -78,13 +67,13 @@ export default function PreviewModal({ onClose }: Props) {
 
         {/* Theme tabs */}
         <div className={pStyles.tabs}>
-          {THEMES.map(th => (
+          {THEME_KEYS.map(key => (
             <button
-              key={th.key}
-              className={`${pStyles.tab} ${theme === th.key ? pStyles.tabActive : ''}`}
-              onClick={() => setTheme(th.key)}
+              key={key}
+              className={`${pStyles.tab} ${theme === key ? pStyles.tabActive : ''}`}
+              onClick={() => setTheme(key)}
             >
-              {th.label}
+              {t(`preview.theme.${key}` as any)}
             </button>
           ))}
         </div>
@@ -92,13 +81,13 @@ export default function PreviewModal({ onClose }: Props) {
         {/* Type selector + regenerate */}
         <div className={pStyles.controls}>
           <div className={pStyles.typeGroup}>
-            {PDF_TYPES.map(tp => (
+            {PDF_TYPE_KEYS.map(key => (
               <button
-                key={tp.key}
-                className={`${pStyles.typeBtn} ${pdfType === tp.key ? pStyles.typeBtnActive : ''}`}
-                onClick={() => setPdfType(tp.key)}
+                key={key}
+                className={`${pStyles.typeBtn} ${pdfType === key ? pStyles.typeBtnActive : ''}`}
+                onClick={() => setPdfType(key)}
               >
-                {tp.label}
+                {t(`preview.type.${key}` as any)}
               </button>
             ))}
           </div>

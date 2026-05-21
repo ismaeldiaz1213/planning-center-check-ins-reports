@@ -1,4 +1,4 @@
-import type { Job, Preview, GenerateRequest } from '../types'
+import type { Job, Preview, GenerateRequest, Settings, SettingsWrite } from '../types'
 
 async function apiFetch(path: string, init?: RequestInit) {
   const res = await fetch(path, init)
@@ -27,4 +27,20 @@ export async function fetchJob(jobId: string, since = 0): Promise<Job> {
 
 export async function runJob(type: 'rutas' | 'escuela'): Promise<{ job_id: string }> {
   return apiFetch(`/api/jobs/${type}/run`, { method: 'POST' })
+}
+
+export async function fetchSettings(): Promise<Settings> {
+  return apiFetch('/api/settings')
+}
+
+export async function saveSettings(body: SettingsWrite): Promise<{ ok: boolean }> {
+  return apiFetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+export async function fetchJobs(): Promise<{ jobs: Job[] }> {
+  return apiFetch('/api/jobs')
 }

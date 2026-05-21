@@ -19,9 +19,9 @@ const TILES: TileDef[] = [
   { id: 'previews', icon: '📄', active: true,  tKey: { title: 'tile.previews.title', desc: 'tile.previews.desc' } },
   { id: 'rutas',    icon: '🚌', active: true,  tKey: { title: 'tile.rutas.title',    desc: 'tile.rutas.desc'    } },
   { id: 'escuela',  icon: '📚', active: true,  tKey: { title: 'tile.escuela.title',  desc: 'tile.escuela.desc'  } },
-  { id: null,       icon: '⚙️', active: false, tKey: { title: 'tile.settings.title', desc: 'tile.settings.desc' } },
-  { id: null,       icon: '⬆️', active: false, tKey: { title: 'tile.upload.title',   desc: 'tile.upload.desc'   } },
-  { id: null,       icon: '📋', active: false, tKey: { title: 'tile.logs.title',     desc: 'tile.logs.desc'     } },
+  { id: 'settings', icon: '⚙️', active: true, tKey: { title: 'tile.settings.title', desc: 'tile.settings.desc' } },
+  { id: null,        icon: '⬆️', active: false, tKey: { title: 'tile.upload.title',   desc: 'tile.upload.desc'   } },
+  { id: 'logs',     icon: '📋', active: true,  tKey: { title: 'tile.logs.title',     desc: 'tile.logs.desc'     } },
 ]
 
 export default function HomePage({ onOpen }: Props) {

@@ -22,3 +22,23 @@ export interface GenerateRequest {
   theme?: string
   type?: string
 }
+
+export interface Settings {
+  pco_app_id: string
+  pco_secret: string
+  google_drive_parent_folder_id: string
+  rutas_weeks: number
+  rutas_theme: string
+  escuela_weeks: number
+  escuela_theme: string
+}
+
+export interface SettingsWrite {
+  pco_app_id?: string
+  pco_secret?: string
+  google_drive_parent_folder_id?: string
+  rutas_weeks?: number
+  rutas_theme?: string
+  escuela_weeks?: number
+  escuela_theme?: string
+}
