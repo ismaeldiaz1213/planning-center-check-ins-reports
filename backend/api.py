@@ -73,12 +73,37 @@ def _write_dotenv(updates: dict[str, str]):
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# In production (Cloud Run) the API and frontend share the same origin, so
+# CORS is only needed for local development.
+# Set ALLOWED_ORIGINS to a comma-separated list to override the defaults.
+_DEV_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+
+
+def _get_allowed_origins() -> list[str]:
+    raw = os.environ.get("ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return list(_DEV_ORIGINS)
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+# ── Authentication placeholder ─────────────────────────────────────────────────
+# TODO (auth): enable Cloud Identity-Aware Proxy (IAP) on the Cloud Run Service
+# to restrict access to authorised Google accounts.  No code changes are required
+# here — IAP operates at the load-balancer layer and rejects unauthenticated
+# requests before they reach this server.  Steps:
+#   1. Reserve a static IP and create a Global HTTPS Load Balancer in GCP.
+#   2. Add the Cloud Run backend service as a Network Endpoint Group (NEG).
+#   3. Enable IAP on the backend service and grant "IAP-secured Web App User"
+#      to the relevant Google accounts or groups.
+# See: https://cloud.google.com/iap/docs/enabling-cloud-run
+
 # ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="IBL Roster API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=_get_allowed_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

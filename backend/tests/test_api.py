@@ -10,7 +10,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import api
-from api import _jobs, _jobs_lock, app, _read_dotenv, _write_dotenv
+from api import _jobs, _jobs_lock, app, _read_dotenv, _write_dotenv, _get_allowed_origins, _DEV_ORIGINS
 
 client = TestClient(app)
 
@@ -433,3 +433,52 @@ class TestDotenvHelpers:
         _write_dotenv({"TEST_ENV_VAR": "hello"})
         assert os.environ.get("TEST_ENV_VAR") == "hello"
         del os.environ["TEST_ENV_VAR"]
+
+
+# ── _get_allowed_origins ──────────────────────────────────────────────────────
+
+class TestGetAllowedOrigins:
+    def test_returns_dev_origins_when_env_not_set(self, monkeypatch):
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        result = _get_allowed_origins()
+        assert result == list(_DEV_ORIGINS)
+
+    def test_returns_dev_origins_when_env_empty_string(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_ORIGINS", "")
+        result = _get_allowed_origins()
+        assert result == list(_DEV_ORIGINS)
+
+    def test_parses_single_custom_origin(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_ORIGINS", "https://roster.example.com")
+        result = _get_allowed_origins()
+        assert result == ["https://roster.example.com"]
+
+    def test_parses_multiple_custom_origins(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_ORIGINS", "https://a.example.com,https://b.example.com")
+        result = _get_allowed_origins()
+        assert result == ["https://a.example.com", "https://b.example.com"]
+
+    def test_strips_whitespace_around_origins(self, monkeypatch):
+        monkeypatch.setenv("ALLOWED_ORIGINS", "  https://a.example.com ,  https://b.example.com  ")
+        result = _get_allowed_origins()
+        assert result == ["https://a.example.com", "https://b.example.com"]
+
+
+# ── CORS headers ──────────────────────────────────────────────────────────────
+
+class TestCORSHeaders:
+    def test_cors_header_present_for_allowed_origin(self, monkeypatch):
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        resp = client.get(
+            "/api/health",
+            headers={"Origin": "http://localhost:5173"},
+        )
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+    def test_cors_header_absent_for_disallowed_origin(self, monkeypatch):
+        monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+        resp = client.get(
+            "/api/health",
+            headers={"Origin": "https://evil.example.com"},
+        )
+        assert "access-control-allow-origin" not in resp.headers

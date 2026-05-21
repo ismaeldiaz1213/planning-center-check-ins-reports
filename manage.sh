@@ -14,6 +14,8 @@ set -e
 PROJECT_ID="ibl-planning-center-check-ins"
 REGION="us-central1"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster:latest"
+API_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster-api:latest"
+API_SERVICE_NAME="roster-api"
 SA_EMAIL="ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccount.com"
 SECRET_ENV="PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
 
@@ -61,6 +63,12 @@ show_menu() {
     echo -e "  ${CYAN}13)${NC} View scheduled jobs"
     echo -e "  ${CYAN}14)${NC} Pause scheduled jobs (stop auto-run)"
     echo -e "  ${CYAN}15)${NC} Resume scheduled jobs"
+    echo ""
+    echo -e "  ${BOLD}API SERVICE${NC}"
+    echo -e "  ${CYAN}16)${NC} Deploy / redeploy API service"
+    echo -e "  ${CYAN}17)${NC} View API service URL"
+    echo -e "  ${CYAN}18)${NC} View API service logs"
+    echo -e "  ${CYAN}19)${NC} Open API service in browser"
     echo ""
     echo -e "  ${DIM}q)  Quit${NC}"
     echo ""
@@ -381,6 +389,104 @@ change_theme() {
     info "Theme will apply on the next run. To test now, use option 8 or 9."
 }
 
+# ── API Service ───────────────────────────────────────────────────────────────
+
+deploy_api_service() {
+    echo ""
+    echo -e "${BOLD}── Deploy API Service ───────────────────────────────────────${NC}"
+    echo ""
+
+    if [[ ! -f "Dockerfile.api" ]]; then
+        error "Dockerfile.api not found. Run this from the project root folder."
+        return
+    fi
+
+    if [[ ! -f "credentials.json" ]]; then
+        error "credentials.json not found — it must be present before building."
+        return
+    fi
+
+    info "Building React frontend..."
+    (cd frontend && npm run build) || { error "Frontend build failed."; return; }
+    success "Frontend built into backend/static/."
+    echo ""
+
+    info "Submitting Docker build to Cloud Build..."
+    info "This takes 3-5 minutes..."
+    echo ""
+
+    gcloud builds submit \
+        --config cloudbuild-api.yaml \
+        --project="$PROJECT_ID" || { error "Cloud Build failed."; return; }
+
+    success "API image pushed to Artifact Registry."
+    echo ""
+
+    info "Deploying Cloud Run service (creates or updates)..."
+    warn "TODO (auth): enable Cloud IAP to restrict access once deployed."
+    echo ""
+
+    # gcloud run deploy creates the service on first run and updates it on subsequent runs.
+    gcloud run deploy "$API_SERVICE_NAME" \
+        --image="$API_IMAGE" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --set-secrets="$SECRET_ENV" \
+        --service-account="$SA_EMAIL" \
+        --allow-unauthenticated \
+        --port=8080 || { error "Service deploy failed."; return; }
+
+    success "API service deployed."
+    echo ""
+    _show_api_url
+}
+
+_show_api_url() {
+    local url
+    url=$(gcloud run services describe "$API_SERVICE_NAME" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --format="value(status.url)" 2>/dev/null) || true
+    if [[ -n "$url" ]]; then
+        echo -e "  ${BOLD}Service URL:${NC} ${CYAN}$url${NC}"
+    else
+        warn "Could not retrieve service URL (service may not be deployed yet)."
+    fi
+}
+
+view_api_url() {
+    echo ""
+    echo -e "${BOLD}── API Service URL ──────────────────────────────────────────${NC}"
+    echo ""
+    _show_api_url
+}
+
+view_api_logs() {
+    echo ""
+    echo -e "${BOLD}── API Service Logs ─────────────────────────────────────────${NC}"
+    echo ""
+    gcloud logging read \
+        "resource.type=cloud_run_revision AND resource.labels.service_name=$API_SERVICE_NAME" \
+        --project="$PROJECT_ID" \
+        --limit=200 \
+        --format="table(timestamp,textPayload)" \
+        --freshness=2d 2>/dev/null | head -100 || warn "No logs found."
+}
+
+open_api_in_browser() {
+    echo ""
+    local url
+    url=$(gcloud run services describe "$API_SERVICE_NAME" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --format="value(status.url)" 2>/dev/null) || true
+    if [[ -z "$url" ]]; then
+        warn "Service not deployed yet. Use option 16 to deploy first."
+        return
+    fi
+    xdg-open "$url" 2>/dev/null || echo -e "  Visit: ${CYAN}$url${NC}"
+}
+
 command -v gcloud &>/dev/null || {
     echo "gcloud not found. Install from https://cloud.google.com/sdk/docs/install"
     exit 1
@@ -406,8 +512,12 @@ while true; do
         13) view_scheduler ;;
         14) pause_scheduler ;;
         15) resume_scheduler ;;
+        16) deploy_api_service ;;
+        17) view_api_url ;;
+        18) view_api_logs ;;
+        19) open_api_in_browser ;;
         q|Q) echo ""; info "Goodbye!"; echo ""; exit 0 ;;
-        *)  warn "Invalid option — please choose 1-15 or q." ;;
+        *)  warn "Invalid option — please choose 1-19 or q." ;;
     esac
 
     echo ""

@@ -1,0 +1,30 @@
+# Dockerfile.api
+#
+# Cloud Run Service image — FastAPI server + built React SPA.
+# Built via:  cloudbuild-api.yaml   (gcloud builds submit --config cloudbuild-api.yaml)
+# Run as:     uvicorn api:app --host 0.0.0.0 --port 8080
+#
+# Prerequisites before submitting a build:
+#   1. cd frontend && npm run build   ← writes backend/static/
+#   2. credentials.json must exist at the project root
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY backend/requirements.txt      requirements.txt
+COPY backend/requirements-web.txt  requirements-web.txt
+
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
+
+COPY backend/ .
+
+# credentials.json is baked into the image so the API can spawn Cloud Run jobs
+# that use Google Drive and Planning Center.
+# TODO (auth): once Cloud IAP is enabled, rotate the service-account key and
+# inject it via Secret Manager instead of baking it into the image.
+COPY credentials.json credentials.json
+
+EXPOSE 8080
+
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8080"]

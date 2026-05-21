@@ -8,7 +8,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-> Changes staged for the next release go here.
+### Added
+
+**Cloud deployment — web UI + API service**
+- `Dockerfile.api` — Cloud Run Service image: installs `requirements.txt` +
+  `requirements-web.txt`, copies the built React SPA (`backend/static/`) and
+  `credentials.json`, runs `uvicorn api:app` on port 8080.
+- `cloudbuild-api.yaml` — Cloud Build config that builds and pushes
+  `roster-api:latest` to Artifact Registry using `Dockerfile.api`.
+- `manage.sh` options 16–19 — **API SERVICE** section:
+  - `16` Deploy / redeploy API service (builds frontend, submits to Cloud Build, runs `gcloud run deploy`)
+  - `17` Print the Cloud Run service URL
+  - `18` Stream API service logs
+  - `19` Open the web UI in a browser
+- `API_IMAGE` and `API_SERVICE_NAME` variables added to `manage.sh`.
+
+**Backend (`api.py`)**
+- `_get_allowed_origins()` — reads `ALLOWED_ORIGINS` env var (comma-separated);
+  falls back to `localhost:5173` / `localhost:3000` for local dev. Used by
+  `CORSMiddleware` instead of a hardcoded list.
+- Auth placeholder comment block in `api.py` documenting the Cloud IAP steps
+  needed to restrict access to specific Google accounts in the future.
+- Auth TODO comment in `Dockerfile.api` pointing to the Secret Manager migration
+  once IAP is in place.
+
+**Tests**
+- `TestGetAllowedOrigins` (5 tests) — covers env-unset, empty-string, single
+  origin, multiple origins, and whitespace-stripping behaviour.
+- `TestCORSHeaders` (2 tests) — verifies `access-control-allow-origin` is
+  present for allowed origins and absent for disallowed ones.
+- Backend total: **175 tests** (up from 168).
+
+**Docs**
+- `DEVELOPMENT.md` — "Deploying the API Service" subsection added under
+  "Deploying code to Google Cloud", covering first-time deploy, subsequent
+  deploys, URL retrieval, logs, and `ALLOWED_ORIGINS` configuration.
 
 ---
 

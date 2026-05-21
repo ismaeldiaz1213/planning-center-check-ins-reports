@@ -1,6 +1,6 @@
 # IBL Planning Center — Automated Roster System
 
-Automatically generates PDF rosters from Planning Center check-ins and uploads them to Google Drive every Monday at 2 AM. Built for **Iglesia Bautista Libertad** in Houston, TX.
+Automatically generates PDF rosters from Planning Center check-ins and uploads them to Google Drive every Monday at 2 AM. A web UI lets administrators manage the system from any browser. Built for **Iglesia Bautista Libertad** in Houston, TX.
 
 ---
 
@@ -13,15 +13,17 @@ Automatically generates PDF rosters from Planning Center check-ins and uploads t
 - 🟠 **Visitor dot** — gold circle marks people added to PCO within the last 7 days; visitor status is recalculated per Sunday for historical accuracy
 - 📊 **Attendance rate** — shows how many of the last N weeks each person attended (e.g. `3/5`)
 - 🎨 **Campaign themes** — seasonal colour schemes for special events
+- 🌐 **Web UI** — dashboard for triggering jobs, previewing PDFs, editing settings, and viewing logs; served from the same Cloud Run URL as the API
 - ☁️ **Fully automated** via Google Cloud Run + Cloud Scheduler
 
 ---
 
 ## Project Structure
 
-The codebase is split into `backend/` (Python pipeline + optional API server)
-and `frontend/` (React web UI, work in progress). The Cloud Run jobs and
-`manage.sh` workflow work the same as always — the frontend is independent.
+The codebase is split into `backend/` (Python pipeline + FastAPI server) and
+`frontend/` (React web UI). The Cloud Run jobs and `manage.sh` workflow are
+unchanged for production use. The web UI is deployed as a separate Cloud Run
+Service alongside the existing jobs.
 
 ```
 planning-center-check-ins-reports/
@@ -37,25 +39,28 @@ planning-center-check-ins-reports/
 │   │   └── pdf/
 │   │       ├── layout.py          #     Low-level ReportLab drawing primitives
 │   │       └── rosters.py         #     generate_address_pdf, generate_simple_roster_pdf
-│   ├── main.py                    #   Cloud Run entrypoint
+│   ├── main.py                    #   Cloud Run job entrypoint
 │   ├── preview.py                 #   Local preview tool — generates PDFs with mock data
-│   ├── api.py                     #   Optional FastAPI server (for the web UI)
-│   ├── tests/                     #   pytest test suite (168 tests)
-│   ├── requirements.txt           #   Core deps — used by Docker
-│   ├── requirements-web.txt       #   FastAPI + uvicorn — API server only
+│   ├── api.py                     #   FastAPI server — serves web UI + REST API
+│   ├── static/                    #   Built React app (output of npm run build, not committed)
+│   ├── tests/                     #   pytest test suite (175 tests)
+│   ├── requirements.txt           #   Core deps — used by the job Dockerfile
+│   ├── requirements-web.txt       #   FastAPI + uvicorn — API service only
 │   └── requirements-dev.txt       #   Dev tools: pytest, ruff
 │
-├── frontend/                      # React web UI (WIP — not in production)
+├── frontend/                      # React + TypeScript web UI (Vite)
 │
-├── Dockerfile                     # Cloud Run job image (Python only)
-├── .github/workflows/ci.yml       # GitHub Actions CI — backend lint+test, frontend type-check+build
+├── Dockerfile                     # Cloud Run job image (Python only, no frontend)
+├── Dockerfile.api                 # Cloud Run service image (FastAPI + built React SPA)
+├── cloudbuild-api.yaml            # Cloud Build config for the API service image
+├── .github/workflows/ci.yml       # GitHub Actions CI — backend lint+test, frontend type-check+build+test
 ├── credentials.json               # Google service account key (never commit this)
 ├── .env                           # Local credentials (never commit this)
 ├── .env.example                   # Template — copy to .env and fill in
 ├── .gcloudignore                  # Tells gcloud what to exclude from builds
 ├── .gitignore                     # Excludes credentials.json, .env, build output
-├── setup_gcloud.sh                # Run ONCE to deploy everything to Google Cloud
-├── manage.sh                      # Day-to-day management (deploy, theme, logs, test)
+├── setup_gcloud.sh                # Run ONCE to deploy Cloud Run jobs to Google Cloud
+├── manage.sh                      # Day-to-day management (deploy, theme, logs, web UI)
 ```
 
 ---
@@ -134,7 +139,7 @@ pip install -r requirements.txt -r requirements-web.txt -r requirements-dev.txt 
 pytest
 ```
 
-168 tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, PDF generation, and the full API layer (settings, job store, run endpoints, .env helpers). None require Planning Center or Google Drive credentials.
+175 tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, PDF generation, the full API layer (settings, job store, run endpoints, .env helpers), and CORS configuration. None require Planning Center or Google Drive credentials.
 
 ```bash
 ruff check .   # linter — run from backend/
@@ -250,6 +255,26 @@ The script walks through everything interactively — project setup, API enablem
 
 ---
 
+## Web UI
+
+The web UI is served by the `roster-api` Cloud Run Service — the same URL
+hosts both the React frontend and the FastAPI backend.
+
+```bash
+./manage.sh → option 19   # open in browser
+./manage.sh → option 17   # print the URL
+```
+
+Dashboard tiles:
+- **Rutas / Escuela Dominical** — trigger a job and watch live terminal output
+- **Vista Previa** — generate and preview PDFs in-browser by season and type
+- **Configuración** — edit PCO credentials, Drive folder, and job defaults
+- **Registros** — browse all job history with expandable output logs
+
+To deploy or redeploy the web UI after any code change: `manage.sh → option 16`.
+
+---
+
 ## Day-to-Day Management
 
 ```bash
@@ -268,8 +293,8 @@ The script walks through everything interactively — project setup, API enablem
   4)  View current secret values
 
   DEPLOYMENT
-  5)  Update credentials.json (rebuild + redeploy)
-  6)  Deploy updated code to Cloud
+  5)  Update credentials.json (rebuild + redeploy jobs)
+  6)  Deploy updated code to Cloud (jobs)
   7)  Change campaign theme
 
   TESTING & LOGS
@@ -283,6 +308,12 @@ The script walks through everything interactively — project setup, API enablem
   13) View scheduled jobs
   14) Pause scheduled jobs
   15) Resume scheduled jobs
+
+  API SERVICE
+  16) Deploy / redeploy API service (web UI + API)
+  17) View API service URL
+  18) View API service logs
+  19) Open API service in browser
 ```
 
 ---
