@@ -1,7 +1,19 @@
 import type { Job, Preview, GenerateRequest, Settings, SettingsWrite } from '../types'
 
+let _authToken: string | null = null
+
+export function setAuthToken(token: string | null) {
+  _authToken = token
+}
+
 async function apiFetch(path: string, init?: RequestInit) {
-  const res = await fetch(path, init)
+  const authHeaders: Record<string, string> = _authToken
+    ? { Authorization: `Bearer ${_authToken}` }
+    : {}
+  const res = await fetch(path, {
+    ...init,
+    headers: { ...authHeaders, ...(init?.headers as Record<string, string>) },
+  })
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
     throw new Error(text || `HTTP ${res.status}`)

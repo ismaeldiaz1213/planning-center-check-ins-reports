@@ -90,7 +90,7 @@ pip install -r requirements-web.txt
 pytest
 ```
 
-Expected output: `175 passed`.
+Expected output: `121 passed`.
 
 ### Run one file or one test
 
@@ -180,12 +180,14 @@ production).
 You need two terminals — one for the API server, one for the frontend dev server.
 
 **Terminal 1 — Backend API:**
+
 ```bash
 cd backend
 uvicorn api:app --reload --port 8000
 ```
 
 **Terminal 2 — Frontend:**
+
 ```bash
 cd frontend
 npm run dev
@@ -194,6 +196,7 @@ npm run dev
 Open `http://localhost:5173`.
 
 The Vite proxy forwards:
+
 - `GET/POST /api/*`       → FastAPI at port 8000
 - `GET /previews/*.pdf`   → FastAPI static file mount
 - `GET /ibl_logo.png`     → FastAPI
@@ -204,6 +207,7 @@ The backend only has CORS enabled for `localhost:5173` and `localhost:3000`.
 ### Running without the frontend
 
 The backend works standalone — either as the CLI job:
+
 ```bash
 cd backend
 python main.py "Rutas"
@@ -212,6 +216,7 @@ python main.py "Escuela Dominical"
 
 Or as the API server without a frontend (use the auto-generated docs at
 `http://localhost:8000/docs` to call endpoints manually):
+
 ```bash
 cd backend
 uvicorn api:app --reload --port 8000
@@ -257,58 +262,6 @@ This updates the `--args` on the Cloud Run jobs. The existing image is reused.
 
 The image does **not** contain `api.py`, `preview.py`, `tests/`, or anything
 from the `frontend/` directory.
-
-### Deploying the API Service
-
-The API service (`Dockerfile.api`) is a separate Cloud Run **Service** (always-on
-HTTP) that serves both the FastAPI backend and the built React SPA.
-
-**First-time deploy:**
-
-```bash
-# 1. Build the React app (output goes to backend/static/)
-cd frontend && npm run build && cd ..
-
-# 2. From the project root, run manage.sh
-./manage.sh → option 16
-```
-
-Option 16 runs `npm run build` automatically and then calls `gcloud builds
-submit --config cloudbuild-api.yaml`.
-
-**Subsequent deploys (code change):**
-
-```bash
-./manage.sh → option 16   # builds frontend, rebuilds image, updates service
-```
-
-**View the live URL:**
-
-```bash
-./manage.sh → option 17
-```
-
-**View logs:**
-
-```bash
-./manage.sh → option 18
-```
-
-**CORS configuration:**
-
-In production the API and frontend share the same Cloud Run URL, so CORS is not
-needed. For local development the API allows `localhost:5173` and `localhost:3000`
-by default.
-
-To add extra allowed origins (e.g. a custom domain), set the `ALLOWED_ORIGINS`
-environment variable on the Cloud Run service before redeploying:
-
-```bash
-gcloud run services update roster-api \
-  --update-env-vars ALLOWED_ORIGINS="https://roster.yourdomain.com" \
-  --region us-central1 \
-  --project ibl-planning-center-check-ins
-```
 
 ---
 

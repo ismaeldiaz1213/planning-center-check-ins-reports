@@ -14,6 +14,7 @@ Automatically generates PDF rosters from Planning Center check-ins and uploads t
 - 📊 **Attendance rate** — shows how many of the last N weeks each person attended (e.g. `3/5`)
 - 🎨 **Campaign themes** — seasonal colour schemes for special events
 - 🌐 **Web UI** — dashboard for triggering jobs, previewing PDFs, editing settings, and viewing logs; served from the same Cloud Run URL as the API
+- 🔐 **Google OAuth login** — access restricted to `iblibertad.org` / `iblibertad.com` Google accounts; unauthenticated requests are rejected before reaching any API route
 - ☁️ **Fully automated** via Google Cloud Run + Cloud Scheduler
 
 ---
@@ -43,12 +44,18 @@ planning-center-check-ins-reports/
 │   ├── preview.py                 #   Local preview tool — generates PDFs with mock data
 │   ├── api.py                     #   FastAPI server — serves web UI + REST API
 │   ├── static/                    #   Built React app (output of npm run build, not committed)
-│   ├── tests/                     #   pytest test suite (175 tests)
+│   ├── tests/                     #   pytest test suite (185 tests)
 │   ├── requirements.txt           #   Core deps — used by the job Dockerfile
 │   ├── requirements-web.txt       #   FastAPI + uvicorn — API service only
 │   └── requirements-dev.txt       #   Dev tools: pytest, ruff
 │
 ├── frontend/                      # React + TypeScript web UI (Vite)
+│   ├── src/
+│   │   ├── auth/AuthContext.tsx    #   Google OAuth credential state + login/logout
+│   │   ├── components/
+│   │   │   ├── LoginOverlay.tsx    #   Full-screen Google sign-in gate
+│   │   │   └── ...                #   Navbar, tiles, modals
+│   │   └── api/client.ts          #   fetch wrappers — auto-injects Authorization header
 │
 ├── Dockerfile                     # Cloud Run job image (Python only, no frontend)
 ├── Dockerfile.api                 # Cloud Run service image (FastAPI + built React SPA)
@@ -139,7 +146,7 @@ pip install -r requirements.txt -r requirements-web.txt -r requirements-dev.txt 
 pytest
 ```
 
-175 tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, PDF generation, the full API layer (settings, job store, run endpoints, .env helpers), and CORS configuration. None require Planning Center or Google Drive credentials.
+185 backend tests cover address parsing, grade logic, date formatting, attendance deduplication, route mapping, helper identification, Escuela Dominical route/visitor logic, PDF generation, the full API layer (settings, job store, run endpoints, .env helpers), CORS configuration, and Google OAuth token verification. 74 frontend tests cover all React components including the login overlay. None require Planning Center or Google Drive credentials.
 
 ```bash
 ruff check .   # linter — run from backend/
@@ -265,6 +272,11 @@ hosts both the React frontend and the FastAPI backend.
 ./manage.sh → option 17   # print the URL
 ```
 
+Access is restricted to Google accounts with an `@iblibertad.org` or
+`@iblibertad.com` email address. Visiting the URL shows a **Sign in with
+Google** screen; the dashboard only loads after a successful sign-in. All API
+routes reject requests without a valid Google ID token.
+
 Dashboard tiles:
 - **Rutas / Escuela Dominical** — trigger a job and watch live terminal output
 - **Vista Previa** — generate and preview PDFs in-browser by season and type
@@ -272,6 +284,7 @@ Dashboard tiles:
 - **Registros** — browse all job history with expandable output logs
 
 To deploy or redeploy the web UI after any code change: `manage.sh → option 16`.
+Option 16 reads `GOOGLE_CLIENT_ID` from `.env` and passes it to Cloud Run automatically.
 
 ---
 

@@ -422,8 +422,18 @@ deploy_api_service() {
     success "API image pushed to Artifact Registry."
     echo ""
 
+    # Read GOOGLE_CLIENT_ID from .env, or prompt if missing.
+    local google_client_id=""
+    if [[ -f ".env" ]]; then
+        google_client_id=$(grep "^GOOGLE_CLIENT_ID=" .env 2>/dev/null | cut -d= -f2- | xargs) || true
+    fi
+    if [[ -z "$google_client_id" ]]; then
+        echo ""
+        info "Google OAuth restricts access to iblibertad.org / iblibertad.com accounts."
+        read -rp "  Google OAuth Client ID (leave blank to disable auth): " google_client_id
+    fi
+
     info "Deploying Cloud Run service (creates or updates)..."
-    warn "TODO (auth): enable Cloud IAP to restrict access once deployed."
     echo ""
 
     # gcloud run deploy creates the service on first run and updates it on subsequent runs.
@@ -433,6 +443,7 @@ deploy_api_service() {
         --project="$PROJECT_ID" \
         --set-secrets="$SECRET_ENV" \
         --service-account="$SA_EMAIL" \
+        --set-env-vars="GOOGLE_CLIENT_ID=${google_client_id}" \
         --allow-unauthenticated \
         --port=8080 || { error "Service deploy failed."; return; }
 

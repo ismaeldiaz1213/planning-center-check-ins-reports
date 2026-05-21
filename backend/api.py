@@ -21,10 +21,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from google.auth.transport import requests as _google_requests
+from google.oauth2 import id_token as _google_id_token
 from pydantic import BaseModel, Field
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
@@ -87,16 +89,31 @@ def _get_allowed_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-# ── Authentication placeholder ─────────────────────────────────────────────────
-# TODO (auth): enable Cloud Identity-Aware Proxy (IAP) on the Cloud Run Service
-# to restrict access to authorised Google accounts.  No code changes are required
-# here — IAP operates at the load-balancer layer and rejects unauthenticated
-# requests before they reach this server.  Steps:
-#   1. Reserve a static IP and create a Global HTTPS Load Balancer in GCP.
-#   2. Add the Cloud Run backend service as a Network Endpoint Group (NEG).
-#   3. Enable IAP on the backend service and grant "IAP-secured Web App User"
-#      to the relevant Google accounts or groups.
-# See: https://cloud.google.com/iap/docs/enabling-cloud-run
+# ── Authentication ────────────────────────────────────────────────────────────
+# Access is restricted to Google accounts whose email domain is in ALLOWED_DOMAINS.
+# Set GOOGLE_CLIENT_ID (OAuth 2.0 Web Client ID) to enable auth.
+# When GOOGLE_CLIENT_ID is not set (local dev), all API routes are open.
+ALLOWED_DOMAINS = {"iblibertad.org", "iblibertad.com"}
+
+
+def _verify_google_token(authorization: Optional[str] = Header(default=None)) -> dict:
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    if not client_id:
+        return {}  # auth disabled — local dev without OAuth configured
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = authorization[7:]
+    try:
+        idinfo = _google_id_token.verify_oauth2_token(
+            token, _google_requests.Request(), client_id
+        )
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    email = idinfo.get("email", "")
+    domain = email.split("@")[-1] if "@" in email else ""
+    if domain not in ALLOWED_DOMAINS:
+        raise HTTPException(status_code=403, detail="Access restricted to authorised accounts")
+    return idinfo
 
 # ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="IBL Roster API", version="1.0.0")
@@ -198,8 +215,14 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/auth/config")
+def auth_config():
+    """Return the Google OAuth client ID so the frontend can initialise sign-in."""
+    return {"google_client_id": os.environ.get("GOOGLE_CLIENT_ID", "")}
+
+
 @app.get("/api/previews")
-def list_previews():
+def list_previews(_: dict = Depends(_verify_google_token)):
     """Return metadata for all PDFs in backend/previews/."""
     PREVIEWS_DIR.mkdir(exist_ok=True)
     files = []
@@ -223,7 +246,7 @@ def list_previews():
 
 
 @app.post("/api/previews/generate", status_code=202)
-def generate_preview(req: GenerateRequest):
+def generate_preview(req: GenerateRequest, _: dict = Depends(_verify_google_token)):
     """Run preview.py in the background; return job_id immediately."""
     cmd = [sys.executable, "preview.py"]
     if req.type:
@@ -239,7 +262,7 @@ def generate_preview(req: GenerateRequest):
 
 
 @app.get("/api/jobs/{job_id}")
-def get_job(job_id: str, since: int = Query(default=0, ge=0)):
+def get_job(job_id: str, since: int = Query(default=0, ge=0), _: dict = Depends(_verify_google_token)):
     """Return job status + output lines from index `since` onward."""
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -259,7 +282,7 @@ def get_job(job_id: str, since: int = Query(default=0, ge=0)):
 
 
 @app.get("/api/settings")
-def get_settings():
+def get_settings(_: dict = Depends(_verify_google_token)):
     """Return current editable settings (reads live env + .env file)."""
     env = _read_dotenv()
     def _get(key: str, default: str = "") -> str:
@@ -276,7 +299,7 @@ def get_settings():
 
 
 @app.put("/api/settings")
-def update_settings(body: SettingsWrite):
+def update_settings(body: SettingsWrite, _: dict = Depends(_verify_google_token)):
     """Persist settings changes to the .env file."""
     updates: dict[str, str] = {}
     if body.pco_app_id is not None:
@@ -299,7 +322,7 @@ def update_settings(body: SettingsWrite):
 
 
 @app.get("/api/jobs")
-def list_jobs():
+def list_jobs(_: dict = Depends(_verify_google_token)):
     """Return all jobs sorted newest-first."""
     with _jobs_lock:
         jobs = list(_jobs.values())
@@ -308,7 +331,7 @@ def list_jobs():
 
 
 @app.post("/api/jobs/rutas/run", status_code=202)
-def run_rutas(req: RunJobRequest = RunJobRequest()):
+def run_rutas(req: RunJobRequest = RunJobRequest(), _: dict = Depends(_verify_google_token)):
     """Trigger python main.py Rutas in the background."""
     weeks = req.weeks or int(os.getenv("RUTAS_DEFAULT_WEEKS", "5"))
     theme = req.theme or os.getenv("RUTAS_DEFAULT_THEME", "")
@@ -321,7 +344,7 @@ def run_rutas(req: RunJobRequest = RunJobRequest()):
 
 
 @app.post("/api/jobs/escuela/run", status_code=202)
-def run_escuela(req: RunJobRequest = RunJobRequest()):
+def run_escuela(req: RunJobRequest = RunJobRequest(), _: dict = Depends(_verify_google_token)):
     """Trigger python main.py 'Escuela Dominical' in the background."""
     weeks = req.weeks or int(os.getenv("ESCUELA_DEFAULT_WEEKS", "5"))
     theme = req.theme or os.getenv("ESCUELA_DEFAULT_THEME", "")

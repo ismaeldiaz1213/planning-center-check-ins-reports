@@ -106,6 +106,12 @@ export const strings = {
   'status.success':      { en: 'Success',                  es: 'Completado' },
   'status.failed':       { en: 'Failed',                   es: 'Error' },
 
+  // ── Login ────────────────────────────────────────────────────────────────────
+  'login.title':    { en: 'IBL Roster',                                         es: 'IBL Roster'                                             },
+  'login.subtitle': { en: 'Sign in to continue',                                es: 'Inicia sesión para continuar'                           },
+  'login.hint':     { en: 'Access is restricted to iblibertad.org and iblibertad.com accounts.',
+                      es: 'El acceso está restringido a cuentas de iblibertad.org e iblibertad.com.'  },
+
   // ── Footer ───────────────────────────────────────────────────────────────────
   'footer.church':       { en: 'Iglesia Bautista Libertad', es: 'Iglesia Bautista Libertad' },
   'footer.location':     { en: 'Houston, TX',              es: 'Houston, TX' },

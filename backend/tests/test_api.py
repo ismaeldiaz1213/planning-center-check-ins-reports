@@ -482,3 +482,62 @@ class TestCORSHeaders:
             headers={"Origin": "https://evil.example.com"},
         )
         assert "access-control-allow-origin" not in resp.headers
+
+
+# ── Auth (/api/auth/config + _verify_google_token) ────────────────────────────
+
+class TestAuth:
+    def test_config_returns_empty_when_client_id_not_set(self, monkeypatch):
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        resp = client.get("/api/auth/config")
+        assert resp.status_code == 200
+        assert resp.json()["google_client_id"] == ""
+
+    def test_config_returns_client_id_when_set(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
+        resp = client.get("/api/auth/config")
+        assert resp.json()["google_client_id"] == "test-client-id.apps.googleusercontent.com"
+
+    def test_health_always_public(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        resp = client.get("/api/health")
+        assert resp.status_code == 200
+
+    def test_protected_route_bypassed_when_client_id_not_set(self, monkeypatch):
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        resp = client.get("/api/settings")
+        assert resp.status_code == 200
+
+    def test_protected_route_returns_401_without_token(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        resp = client.get("/api/settings")
+        assert resp.status_code == 401
+
+    def test_protected_route_returns_401_for_invalid_token(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        with patch("google.oauth2.id_token.verify_oauth2_token", side_effect=ValueError("bad")):
+            resp = client.get("/api/settings", headers={"Authorization": "Bearer bad-token"})
+        assert resp.status_code == 401
+
+    def test_protected_route_returns_403_for_disallowed_domain(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        with patch("google.oauth2.id_token.verify_oauth2_token", return_value={"email": "user@gmail.com"}):
+            resp = client.get("/api/settings", headers={"Authorization": "Bearer valid-token"})
+        assert resp.status_code == 403
+
+    def test_allows_iblibertad_org_account(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        with patch("google.oauth2.id_token.verify_oauth2_token", return_value={"email": "admin@iblibertad.org"}):
+            resp = client.get("/api/settings", headers={"Authorization": "Bearer valid-token"})
+        assert resp.status_code == 200
+
+    def test_allows_iblibertad_com_account(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        with patch("google.oauth2.id_token.verify_oauth2_token", return_value={"email": "admin@iblibertad.com"}):
+            resp = client.get("/api/settings", headers={"Authorization": "Bearer valid-token"})
+        assert resp.status_code == 200
+
+    def test_missing_bearer_prefix_returns_401(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        resp = client.get("/api/settings", headers={"Authorization": "Basic abc123"})
+        assert resp.status_code == 401

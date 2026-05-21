@@ -1,0 +1,47 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--blue-bg);
+  z-index: 9999;
+}
+
+.card {
+  background: white;
+  border-radius: 12px;
+  padding: 48px 40px;
+  text-align: center;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--blue-dark, #1a2f5e);
+  margin: 0;
+}
+
+.subtitle {
+  color: #555;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.buttonWrapper {
+  margin-top: 8px;
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: #999;
+  margin: 0;
+  line-height: 1.4;
+}
