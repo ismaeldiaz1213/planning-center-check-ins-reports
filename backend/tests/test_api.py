@@ -5,11 +5,8 @@
 # All file-system and subprocess interactions are mocked.
 
 import os
-import threading
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 import api

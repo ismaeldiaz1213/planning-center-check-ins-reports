@@ -8,6 +8,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+> Changes staged for the next release go here.
+
+---
+
+## [2.4.1] — 2026-05-19
+
 ### Added
 
 **Web UI**

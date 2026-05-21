@@ -3,6 +3,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import LogsModal from '../LogsModal'
 import { renderWithProviders } from '../../test/helpers'
+import type { Job } from '../../types'
 
 vi.mock('../../api/client', () => ({
   fetchJobs: vi.fn(),
@@ -11,7 +12,7 @@ vi.mock('../../api/client', () => ({
 import { fetchJobs } from '../../api/client'
 
 const NOW = new Date().toISOString()
-const MOCK_JOBS = [
+const MOCK_JOBS: Job[] = [
   {
     id: 'job-1',
     type: 'rutas',
