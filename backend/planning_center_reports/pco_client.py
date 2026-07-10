@@ -26,6 +26,11 @@ from planning_center_reports.config import BASE_URL, PCO_APP_ID, PCO_SECRET
 # valid credentials.
 _auth = HTTPBasicAuth(PCO_APP_ID, PCO_SECRET)
 
+
+class PaginationCircuitBreakerError(Exception):
+    """Raised when a per-period page count exceeds _MAX_PAGES_PER_PERIOD.
+    Not caught by get_helpers_set's broad except — propagates to abort the run."""
+
 # Module-level cache: person_id → details dict. Shared across the whole run so
 # a person who appears on multiple bus routes is only fetched once.
 _person_cache: dict = {}
@@ -102,72 +107,80 @@ def get_recent_event_periods(event_id: str, weeks: int = 5) -> tuple:
     return period_ids, period_dates, period_starts_at
 
 
+def _fetch_checkins_page(url: str, params: dict, page: int) -> dict:
+    """Fetch one page of check-ins with retry logic. Returns the parsed JSON body."""
+    max_retries = 7
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, auth=_auth, params=params, timeout=60)
+        except (
+            requests.exceptions.SSLError,
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as e:
+            wait = 2 ** attempt
+            print(f"  {type(e).__name__} — waiting {wait}s before retry ({attempt + 1}/{max_retries})...", flush=True)
+            time.sleep(wait)
+            continue
+        if response.status_code == 429:
+            wait = 2 ** attempt
+            for remaining in range(wait, 0, -1):
+                print(f"  Rate limited — retrying in {remaining}s...  ", end="\r", flush=True)
+                time.sleep(1)
+            print("  Rate limit wait done, retrying...          ", flush=True)
+            continue
+        if not response.ok:
+            print(
+                f"\n  HTTP {response.status_code} fetching page {page}: {response.text[:200]}",
+                flush=True,
+            )
+            response.raise_for_status()
+        return response.json()
+    raise Exception(f"Failed to fetch check-ins page {page} after {max_retries} retries.")
+
+
+_MAX_PAGES_PER_PERIOD = 30  # circuit breaker — a single period should never exceed ~3000 check-ins
+
+
 def get_checkins_for_event_periods(event_id: str, event_period_ids: list) -> tuple:
-    """Paginate through all check-ins for the given event, keeping only those
-    that belong to the specified event period IDs.
+    """Fetch check-ins for each event period individually.
+
+    Uses the nested /events/{event_id}/event_periods/{period_id}/check_ins endpoint
+    so PCO scopes results to exactly that period. This keeps page count proportional
+    to attendance size, not to the event's full history.
 
     Returns (checkins, included) where both are lists of PCO API objects.
     `included` contains sideloaded Location and Person records.
     """
-    all_checkins, all_included = [], []
-    valid_period_ids = set(event_period_ids)
-    print(f"  Fetching all check-ins for event {event_id}...", flush=True)
-    url    = f"{BASE_URL}/check-ins/v2/check_ins"
-    params = {"where[event_id]": event_id, "include": "locations,person", "per_page": 100}
-    page   = 1
+    all_checkins: list = []
+    all_included: list = []
 
-    while url:
-        print(f"    Page {page}...", flush=True)
-        max_retries = 7
-        response = None
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(url, auth=_auth, params=params, timeout=60)
-            except (
-                requests.exceptions.SSLError,
-                requests.exceptions.ReadTimeout,
-                requests.exceptions.Timeout,
-                requests.exceptions.ConnectionError,
-            ) as e:
-                wait = 2 ** attempt
-                print(f"  {type(e).__name__} — waiting {wait}s before retry ({attempt + 1}/{max_retries})...", flush=True)
-                time.sleep(wait)
-                continue
-            print(f"    Status: {response.status_code}", flush=True)
-            if response.status_code == 429:
-                wait = 2 ** attempt
-                for remaining in range(wait, 0, -1):
-                    print(f"  Rate limited — retrying in {remaining}s...  ", end="\r", flush=True)
-                    time.sleep(1)
-                print("  Rate limit wait done, retrying...          ", flush=True)
-                continue
-            response.raise_for_status()
-            break
-        else:
-            raise Exception(f"Failed to fetch check-ins page {page} after {max_retries} retries.")
-        body  = response.json()
-        batch = body["data"]
-        kept  = 0
-        for checkin in batch:
-            ep_id = (checkin
-                     .get("relationships", {})
-                     .get("event_period", {})
-                     .get("data", {})
-                     .get("id"))
-            if ep_id in valid_period_ids:
-                all_checkins.append(checkin)
-                kept += 1
-        all_included.extend(body.get("included", []))
-        print(f"    Got {len(batch)}, kept {kept}", flush=True)
-        next_url = body.get("links", {}).get("next")
-        # Guard against the API returning the same next URL (infinite loop).
-        if next_url == url:
-            break
-        url    = next_url
-        params = {}
-        page  += 1
+    for period_id in event_period_ids:
+        print(f"  Fetching check-ins for period {period_id}...", flush=True)
+        url    = f"{BASE_URL}/check-ins/v2/events/{event_id}/event_periods/{period_id}/check_ins"
+        params = {"include": "locations,person", "per_page": 100}
+        page   = 1
 
-    print(f"  Total matching check-ins: {len(all_checkins)}", flush=True)
+        while url:
+            if page > _MAX_PAGES_PER_PERIOD:
+                raise PaginationCircuitBreakerError(
+                    f"Period {period_id} exceeded {_MAX_PAGES_PER_PERIOD} pages — "
+                    "the PCO filter may not be working. Aborting to avoid runaway fetching."
+                )
+            body     = _fetch_checkins_page(url, params, page)
+            batch    = body["data"]
+            all_checkins.extend(batch)
+            all_included.extend(body.get("included", []))
+            print(f"    Period {period_id} — page {page}: {len(batch)} check-ins", flush=True)
+            next_url = body.get("links", {}).get("next")
+            if not next_url or next_url == url:
+                break
+            url    = next_url
+            params = {}
+            page  += 1
+
+    print(f"  Total check-ins: {len(all_checkins)}", flush=True)
     return all_checkins, all_included
 
 
@@ -281,6 +294,8 @@ def get_helpers_set(weeks: int = 5) -> set:
 
     try:
         checkins, included = get_checkins_for_event_periods(event_id, event_period_ids)
+    except PaginationCircuitBreakerError:
+        raise
     except Exception as e:
         print(f"  ⚠ Could not fetch helpers check-ins: {e}", flush=True)
         return set()

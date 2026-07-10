@@ -35,6 +35,23 @@ def main():
         default=None,
         help="Optional campaign theme: primavera, verano, otono, invierno",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Fetch real PCO data and generate PDFs but skip Google Drive upload. "
+             "Saves PDFs to --output-dir instead.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="./out",
+        help="Directory to save PDFs when --dry-run is set (default: ./out)",
+    )
+    parser.add_argument(
+        "--location",
+        default=None,
+        help="Only process locations whose name contains this string (case-insensitive). "
+             "e.g. --location 'Ruta 1' or --location 'Nursery'",
+    )
     args = parser.parse_args()
 
     # Apply theme globally before any PDF generation begins.
@@ -44,10 +61,13 @@ def main():
     if args.theme:
         print(f"Theme: {config._theme['campaign']}", flush=True)
 
+    if args.dry_run:
+        print(f"[dry-run] No files will be uploaded. PDFs will be saved to {args.output_dir}", flush=True)
+
     if args.event_name == "Rutas":
-        run_rutas(weeks=args.weeks)
+        run_rutas(weeks=args.weeks, dry_run=args.dry_run, output_dir=args.output_dir, location_filter=args.location)
     elif args.event_name == "Escuela Dominical":
-        run_escuela_dominical(weeks=args.weeks)
+        run_escuela_dominical(weeks=args.weeks, dry_run=args.dry_run, output_dir=args.output_dir, location_filter=args.location)
     else:
         print(
             f"Unknown event '{args.event_name}'. Supported: 'Rutas', 'Escuela Dominical'",

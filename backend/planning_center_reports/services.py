@@ -12,6 +12,8 @@
 # separately in tests/test_attendance.py.
 
 import os
+import shutil
+import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -82,6 +84,7 @@ def _build_attendees(
     total_weeks: int = 5,
     helpers_set: set = None,
     route_map: dict = None,
+    location_filter: str | None = None,
 ) -> tuple:
     """Transform raw PCO check-in data into grouped attendee records.
 
@@ -143,6 +146,11 @@ def _build_attendees(
 
         location_id   = location_data[0]["id"]
         location_name = location_lookup.get(location_id, "Unknown Location")
+
+        # Skip non-matching locations before any API calls
+        if location_filter and location_filter.lower() not in location_name.lower():
+            continue
+
         person_rel    = checkin["relationships"].get("person", {}).get("data")
         person_id     = person_rel["id"] if person_rel else None
 
@@ -266,7 +274,46 @@ def _build_sunday_data(
     ]
 
 
-def run_rutas(weeks: int = 5):
+def _validate_location_filter(location_filter: str | None, included: list) -> None:
+    """Exit early if location_filter matches nothing in the sideloaded location data.
+    Called right after the check-in fetch so we fail before helpers + person detail calls."""
+    if not location_filter:
+        return
+    location_names = {
+        item["attributes"]["name"]
+        for item in included if item["type"] == "Location"
+    }
+    matches = [n for n in location_names if location_filter.lower() in n.lower()]
+    if not matches:
+        print(f"\nNo location matching '{location_filter}'.", flush=True)
+        print(f"Available: {sorted(location_names)}", flush=True)
+        sys.exit(1)
+    print(f"Filter '{location_filter}' matches: {sorted(matches)}", flush=True)
+
+
+def _filter_locations(grouped: dict, location_filter: str | None) -> dict:
+    """Return grouped filtered to locations whose name contains location_filter (case-insensitive).
+    Exits with an error listing available locations if no match is found."""
+    if not location_filter:
+        return grouped
+    filtered = {k: v for k, v in grouped.items() if location_filter.lower() in k.lower()}
+    if not filtered:
+        print(f"No location matching '{location_filter}'.", flush=True)
+        print(f"Available: {sorted(grouped.keys())}", flush=True)
+        sys.exit(1)
+    return filtered
+
+
+def _save_pdf_locally(pdf_path: str, location_name: str, filename: str, output_dir: str) -> None:
+    """Copy a generated PDF to output_dir, prefixed with the location name."""
+    os.makedirs(output_dir, exist_ok=True)
+    safe_name = location_name.replace("/", "-").replace(" ", "_")
+    dest = os.path.join(output_dir, f"{safe_name}_{filename}")
+    shutil.copy(pdf_path, dest)
+    print(f"  [dry-run] Saved → {dest}", flush=True)
+
+
+def run_rutas(weeks: int = 5, dry_run: bool = False, output_dir: str = "./out", location_filter: str | None = None):
     """Run the full pipeline for the Rutas (bus routes) event.
 
     For each bus route location:
@@ -274,7 +321,7 @@ def run_rutas(weeks: int = 5):
       2. Enriches attendee records with person details from the People API.
       3. Marks helpers (age 16+ from Junta de Rutas Attendance).
       4. Generates Direcciones-Roster.pdf (address-grouped) and Roster.pdf (alphabetical).
-      5. Uploads both PDFs to the corresponding Drive subfolder.
+      5. Uploads both PDFs to the corresponding Drive subfolder (or saves locally if dry_run).
     """
     print("Finding event 'Rutas'...", flush=True)
     event_id = get_event_id("Rutas")
@@ -283,19 +330,23 @@ def run_rutas(weeks: int = 5):
     print(f"Finding recent event periods (last {weeks} weeks)...", flush=True)
     event_period_ids, _, _ = get_recent_event_periods(event_id, weeks=weeks)
 
-    # Fetch helpers early — reused for Rutas rosters
-    helpers_set = get_helpers_set(weeks=weeks)
-
     print("Fetching check-ins...", flush=True)
     checkins, included = get_checkins_for_event_periods(event_id, event_period_ids)
 
-    grouped, location_lookup = _build_attendees(
-        checkins, included, weeks, helpers_set=helpers_set
-    )
-    print(f"Locations found: {list(location_lookup.values())}", flush=True)
+    # Validate filter before the expensive helpers + person-detail fetches
+    _validate_location_filter(location_filter, included)
 
-    print("\nConnecting to Google Drive...", flush=True)
-    drive_service = get_drive_service()
+    helpers_set = get_helpers_set(weeks=weeks)
+
+    grouped, location_lookup = _build_attendees(
+        checkins, included, weeks, helpers_set=helpers_set, location_filter=location_filter
+    )
+    print(f"Locations to process: {sorted(grouped.keys())}", flush=True)
+
+    drive_service = None
+    if not dry_run:
+        print("\nConnecting to Google Drive...", flush=True)
+        drive_service = get_drive_service()
 
     for location_name, attendees in grouped.items():
         vc = sum(1 for p in attendees if p.get("is_visitor"))
@@ -307,15 +358,21 @@ def run_rutas(weeks: int = 5):
             location_name, RUTAS_SUBTITLE, attendees, "Roster.pdf"
         )
 
-        folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
-        upload_and_replace(drive_service, folder_id, addr_pdf,  "Direcciones-Roster.pdf")
-        upload_and_replace(drive_service, folder_id, lista_pdf, "Roster.pdf")
-        os.remove(addr_pdf)
-        os.remove(lista_pdf)
-        print(f"  ✓ Uploaded Direcciones-Roster.pdf + Roster.pdf for {location_name}", flush=True)
+        try:
+            if dry_run:
+                _save_pdf_locally(addr_pdf, location_name, "Direcciones-Roster.pdf", output_dir)
+                _save_pdf_locally(lista_pdf, location_name, "Roster.pdf", output_dir)
+            else:
+                folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
+                upload_and_replace(drive_service, folder_id, addr_pdf,  "Direcciones-Roster.pdf")
+                upload_and_replace(drive_service, folder_id, lista_pdf, "Roster.pdf")
+                print(f"  ✓ Uploaded Direcciones-Roster.pdf + Roster.pdf for {location_name}", flush=True)
+        finally:
+            os.remove(addr_pdf)
+            os.remove(lista_pdf)
 
 
-def run_escuela_dominical(weeks: int = 5):
+def run_escuela_dominical(weeks: int = 5, dry_run: bool = False, output_dir: str = "./out", location_filter: str | None = None):
     """Run the full pipeline for the Escuela Dominical (Sunday school) event.
 
     For each class location:
@@ -324,7 +381,7 @@ def run_escuela_dominical(weeks: int = 5):
       3. Maps each person to their bus route (from Rutas check-ins).
       4. Filters out workers (age 16+ from Junta de Rutas Attendance).
       5. Generates Roster.pdf with route information and attendance summary.
-      6. Uploads it to the corresponding Drive subfolder.
+      6. Uploads it to the corresponding Drive subfolder (or saves locally if dry_run).
     """
     print("Finding event 'Escuela Dominical'...", flush=True)
     event_id = get_event_id("Escuela Dominical")
@@ -333,23 +390,28 @@ def run_escuela_dominical(weeks: int = 5):
     print(f"Finding recent event periods (last {weeks} weeks)...", flush=True)
     period_ids, period_dates, period_starts_at = get_recent_event_periods(event_id, weeks=weeks)
 
-    # Fetch helpers and route mappings early
-    helpers_set = get_helpers_set(weeks=weeks)
-    route_map = _get_route_mapping(weeks=weeks)
-
     print("Fetching Escuela Dominical check-ins...", flush=True)
     checkins, included = get_checkins_for_event_periods(event_id, period_ids)
 
+    # Validate filter before the expensive helpers + route-map + person-detail fetches
+    _validate_location_filter(location_filter, included)
+
+    helpers_set = get_helpers_set(weeks=weeks)
+    route_map = _get_route_mapping(weeks=weeks)
+
     grouped, location_lookup = _build_attendees(
-        checkins, included, weeks, helpers_set=helpers_set, route_map=route_map
+        checkins, included, weeks, helpers_set=helpers_set, route_map=route_map,
+        location_filter=location_filter
     )
-    print(f"Locations found: {list(location_lookup.values())}", flush=True)
+    print(f"Locations to process: {sorted(grouped.keys())}", flush=True)
 
     # Inverse map so we can look up location_id by name inside the loop
     name_to_location_id = {v: k for k, v in location_lookup.items()}
 
-    print("\nConnecting to Google Drive...", flush=True)
-    drive_service = get_drive_service()
+    drive_service = None
+    if not dry_run:
+        print("\nConnecting to Google Drive...", flush=True)
+        drive_service = get_drive_service()
 
     for location_name, attendees in grouped.items():
         # Helpers remain on the roster — they just have no route (cleared in _build_attendees)
@@ -368,11 +430,17 @@ def run_escuela_dominical(weeks: int = 5):
             helpers_set, period_starts_at, person_created_at,
         )
 
-        pdf_file  = generate_simple_roster_pdf(
+        pdf_file = generate_simple_roster_pdf(
             location_name, "Escuela Dominical", attendees, "Roster.pdf",
             show_route=True, sunday_data=sunday_data,
         )
-        folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
-        upload_and_replace(drive_service, folder_id, pdf_file, "Roster.pdf")
-        os.remove(pdf_file)
-        print(f"  ✓ Uploaded Roster.pdf for {location_name}", flush=True)
+
+        try:
+            if dry_run:
+                _save_pdf_locally(pdf_file, location_name, "Roster.pdf", output_dir)
+            else:
+                folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
+                upload_and_replace(drive_service, folder_id, pdf_file, "Roster.pdf")
+                print(f"  ✓ Uploaded Roster.pdf for {location_name}", flush=True)
+        finally:
+            os.remove(pdf_file)
