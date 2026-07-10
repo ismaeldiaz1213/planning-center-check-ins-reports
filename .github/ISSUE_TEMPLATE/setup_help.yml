@@ -1,0 +1,33 @@
+name: Setup Help
+description: Get help configuring the project for your church
+title: "[Setup]: "
+labels: ["setup", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste real API keys, service account JSON, attendee data, or roster PDFs.
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Local, Cloud Run, other?
+      placeholder: "Local macOS / Cloud Run / Ubuntu server"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the setup step that failed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      description: Remove secrets before pasting.
+      render: shell
