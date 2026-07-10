@@ -204,6 +204,43 @@ The Vite proxy forwards:
 No CORS configuration is needed because Vite handles the proxy in development.
 The backend only has CORS enabled for `localhost:5173` and `localhost:3000`.
 
+### Local testing with real Planning Center data (no Drive upload)
+
+The **LOCAL TESTING** section of `manage.sh` (options 20-24) lets you run the full pipeline
+against your real Planning Center account without uploading anything to Google Drive. PDFs are
+saved locally to `./out/` instead.
+
+```bash
+./manage.sh
+```
+
+| Option | What it does |
+|--------|-------------|
+| 20 | Build the local Docker image (run once, or after any code change) |
+| 21 | Dry-run Rutas — fetches all bus routes, saves PDFs to `./out/` |
+| 22 | Dry-run Rutas — prompts for a route name, only generates that one |
+| 23 | Dry-run Escuela Dominical — all classes |
+| 24 | Dry-run Escuela Dominical — prompts for a class name |
+
+For option 22 and 24, the name field is a **case-insensitive substring match** — entering
+`Ruta 1` will match `Ruta 1 - Bus` and `Ruta 1 - Van`. If the name doesn't match anything,
+the script prints the full list of available locations.
+
+**Prerequisites for options 20-24:**
+- Docker installed and running
+- `credentials.json` in the project root
+- `.env` filled in with `PCO_APP_ID`, `PCO_SECRET`, `GOOGLE_DRIVE_PARENT_FOLDER_ID`
+
+The testing story in full:
+
+| Method | Data | Drive upload |
+|--------|------|-------------|
+| `python preview.py` | Mock (fake names) | None — saves to `backend/previews/` |
+| `manage.sh → 21-24` | Real Planning Center | None — saves to `./out/` |
+| `manage.sh → 8-9` | Real Planning Center | Yes — uploads to Google Drive |
+
+---
+
 ### Running without the frontend
 
 The backend works standalone — either as the CLI job:

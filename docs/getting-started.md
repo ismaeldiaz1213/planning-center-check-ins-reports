@@ -76,15 +76,32 @@ See [sample-data.md](sample-data.md) for full usage (themes, types, `--open` fla
 
 ## 6. Run against your Planning Center account
 
-Replace `"Rutas"` and `"Escuela Dominical"` with the exact event names from your
-Planning Center Check-Ins account (they are case-sensitive):
+Before uploading anything to Drive, do a **dry run** from the project root to verify
+everything looks right. The easiest way is through `manage.sh`:
 
 ```bash
-python main.py "Rutas"
-python main.py "Escuela Dominical"
+./manage.sh → option 20   # build local Docker image (one-time)
+./manage.sh → option 21   # dry-run Rutas — all routes, no Drive upload
+./manage.sh → option 22   # dry-run Rutas — single route (prompts for name)
+./manage.sh → option 23   # dry-run Escuela Dominical — all classes
+./manage.sh → option 24   # dry-run Escuela Dominical — single class
 ```
 
-PDFs will be generated and uploaded to your Google Drive folder.
+PDFs are saved to `./out/` and the folder opens automatically when done.
+Nothing is uploaded to Google Drive.
+
+When you're happy with the output, run the real job:
+
+```bash
+./manage.sh → option 8    # run Rutas (uploads to Drive)
+./manage.sh → option 9    # run Escuela Dominical (uploads to Drive)
+```
+
+| Path | Data | Drive upload | Output |
+|------|------|-------------|--------|
+| `python preview.py` | Fake (mock names) | No | `backend/previews/` |
+| `manage.sh → 21-24` | Real Planning Center | No | `./out/` |
+| `manage.sh → 8-9` | Real Planning Center | Yes | Google Drive |
 
 ---
 

@@ -33,6 +33,8 @@ IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster:latest"
 API_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster-api:latest"
 API_SERVICE_NAME="roster-api"
 SECRET_ENV="PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
+LOCAL_IMAGE="roster-job-local"
+LOCAL_OUT_DIR="./out"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 BOLD='\033[1m'
@@ -84,6 +86,13 @@ show_menu() {
     echo -e "  ${CYAN}17)${NC} View API service URL"
     echo -e "  ${CYAN}18)${NC} View API service logs"
     echo -e "  ${CYAN}19)${NC} Open API service in browser"
+    echo ""
+    echo -e "  ${BOLD}LOCAL TESTING${NC} ${DIM}(real PCO data — no Drive upload)${NC}"
+    echo -e "  ${CYAN}20)${NC} Build local Docker image"
+    echo -e "  ${CYAN}21)${NC} Dry-run Rutas — all routes"
+    echo -e "  ${CYAN}22)${NC} Dry-run Rutas — single route"
+    echo -e "  ${CYAN}23)${NC} Dry-run Escuela Dominical — all classes"
+    echo -e "  ${CYAN}24)${NC} Dry-run Escuela Dominical — single class"
     echo ""
     echo -e "  ${DIM}q)  Quit${NC}"
     echo ""
@@ -510,6 +519,104 @@ open_api_in_browser() {
     xdg-open "$url" 2>/dev/null || echo -e "  Visit: ${CYAN}$url${NC}"
 }
 
+# ── Local testing ─────────────────────────────────────────────────────────────
+
+_check_local_prereqs() {
+    if ! command -v docker &>/dev/null; then
+        error "Docker not found. Install from https://docs.docker.com/get-docker/"
+        return 1
+    fi
+    if [[ ! -f "credentials.json" ]]; then
+        error "credentials.json not found in the project root."
+        return 1
+    fi
+    if [[ ! -f ".env" ]]; then
+        error ".env not found. Copy .env.example to .env and fill in your credentials."
+        return 1
+    fi
+}
+
+_ensure_local_image() {
+    if ! docker image inspect "$LOCAL_IMAGE" &>/dev/null; then
+        warn "Local Docker image not found — building it now..."
+        echo ""
+        build_local_image || return 1
+    fi
+}
+
+build_local_image() {
+    echo ""
+    echo -e "${BOLD}── Build Local Docker Image ─────────────────────────────────${NC}"
+    echo ""
+    _check_local_prereqs || return
+    if [[ ! -f "backend/main.py" ]]; then
+        error "Project files not found. Run this from the project root folder."
+        return
+    fi
+    info "Building local Docker image (1-2 minutes)..."
+    echo ""
+    docker build -f Dockerfile -t "$LOCAL_IMAGE" . || { error "Docker build failed."; return; }
+    # Remove dangling layers left behind by the previous build
+    docker image prune -f &>/dev/null || true
+    echo ""
+    success "Local image built: $LOCAL_IMAGE"
+    info "Use options 21-24 to run dry-run tests against your Planning Center data."
+}
+
+dry_run_job() {
+    local event_name=$1
+    local location_filter=${2:-""}
+
+    echo ""
+    echo -e "${BOLD}── Dry-run: $event_name ─────────────────────────────────────${NC}"
+    echo ""
+    _check_local_prereqs || return
+    _ensure_local_image || return
+
+    # Fix permissions so the container can read the file
+    chmod 644 credentials.json 2>/dev/null || true
+    mkdir -p "$LOCAL_OUT_DIR"
+
+    info "Fetching from Planning Center — nothing will be uploaded to Google Drive."
+    if [[ -n "$location_filter" ]]; then
+        info "Filtering to locations matching: \"$location_filter\""
+    fi
+    info "PDFs will be saved to: $(pwd)/$LOCAL_OUT_DIR/"
+    echo ""
+
+    local run_args=(--dry-run --output-dir /app/out)
+    [[ -n "$location_filter" ]] && run_args+=(--location "$location_filter")
+
+    docker run --rm \
+        -v "$(pwd)/credentials.json:/app/credentials.json:ro" \
+        -v "$(pwd)/$LOCAL_OUT_DIR:/app/out:z" \
+        --env-file .env \
+        "$LOCAL_IMAGE" "${run_args[@]}" "$event_name"
+
+    echo ""
+    success "Done. PDFs saved to: $(pwd)/$LOCAL_OUT_DIR/"
+    xdg-open "$LOCAL_OUT_DIR" 2>/dev/null || true
+}
+
+dry_run_single() {
+    local event_name=$1
+    local location_label=$2
+    local example=$3
+
+    echo ""
+    echo -e "${BOLD}── Dry-run: $event_name — single location ───────────────────${NC}"
+    echo ""
+    info "Enter part of the $location_label name (case-insensitive match)."
+    info "Example: $example"
+    echo ""
+    read -rp "  $location_label name (or part of it): " LOCATION_FILTER
+    if [[ -z "$LOCATION_FILTER" ]]; then
+        warn "No location entered — cancelled."
+        return
+    fi
+    dry_run_job "$event_name" "$LOCATION_FILTER"
+}
+
 command -v gcloud &>/dev/null || {
     echo "gcloud not found. Install from https://cloud.google.com/sdk/docs/install"
     exit 1
@@ -539,8 +646,13 @@ while true; do
         17) view_api_url ;;
         18) view_api_logs ;;
         19) open_api_in_browser ;;
+        20) build_local_image ;;
+        21) dry_run_job "Rutas" ;;
+        22) dry_run_single "Rutas" "route" "Ruta 1" ;;
+        23) dry_run_job "Escuela Dominical" ;;
+        24) dry_run_single "Escuela Dominical" "class" "Nursery" ;;
         q|Q) echo ""; info "Goodbye!"; echo ""; exit 0 ;;
-        *)  warn "Invalid option — please choose 1-19 or q." ;;
+        *)  warn "Invalid option — please choose 1-24 or q." ;;
     esac
 
     echo ""
