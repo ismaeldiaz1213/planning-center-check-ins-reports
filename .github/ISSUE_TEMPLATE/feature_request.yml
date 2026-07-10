@@ -1,0 +1,85 @@
+name: Feature Request
+description: Suggest an improvement or new capability
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest an improvement. The more context you give, the easier it is to prioritize and build something that actually fits your church's workflow.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Which part of the project does this touch?
+      options:
+        - PDF layout or content
+        - Web UI (dashboard, tiles, settings)
+        - Planning Center integration
+        - Google Drive / file organization
+        - Setup / deployment / manage.sh
+        - Scheduling / automation
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case or pain point. What are you trying to do that the project doesn't currently support?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would you like to see added or changed? Don't worry if it's rough since a general idea is enough to get started.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: How often does this affect you?
+      options:
+        - Every week (blocks my workflow)
+        - Most weeks (annoying workaround)
+        - Occasionally
+        - Nice to have, not urgent
+    validations:
+      required: true
+
+  - type: textarea
+    id: church_context
+    attributes:
+      label: Church context
+      description: Helps gauge whether this is broadly useful or specific to your setup.
+      placeholder: |
+        e.g. We have 12 bus routes and 8 Sunday school classes.
+        We don't use the web UI, just the CLI.
+        We run this on a shared Google Workspace account.
+
+  - type: textarea
+    id: mockup
+    attributes:
+      label: Mockup or example (optional)
+      description: A sketch, screenshot, or example PDF layout helps a lot. Do not include real attendee data.
+
+  - type: dropdown
+    id: willing_to_test
+    attributes:
+      label: Would you be willing to test a beta version?
+      options:
+        - "Yes"
+        - "Yes, but only if setup is simple"
+        - "No"
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds you've tried
+      description: Anything you've done to work around this in the meantime.
