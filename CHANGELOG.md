@@ -27,6 +27,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   test, preventing `.env` values from leaking into the test environment via `load_dotenv`.
 - `backend/logo.png` — generic logo file replacing `ibl_logo.png`; drop in your own PNG to
   customise the header and web UI footer.
+- `--dry-run` CLI flag — runs the full pipeline against real Planning Center data but skips
+  Google Drive upload; PDFs are saved locally instead.
+- `--output-dir` CLI flag — directory for dry-run PDF output (default: `./out`).
+- `--location` CLI flag — case-insensitive substring filter; only generates PDFs for matching
+  locations (e.g. `--location "Ruta 8"` or `--location "Nursery"`). Prints available locations
+  and exits if the filter matches nothing.
+- `manage.sh` **LOCAL TESTING** section (options 20–24) — build a local Docker image and run
+  dry-run jobs against real Planning Center data without uploading anything to Drive. PDFs land
+  in `./out/` and the folder opens automatically on completion.
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` — contributor guide and Contributor Covenant code of
+  conduct for the open-source release.
+- `.github/PULL_REQUEST_TEMPLATE.md` and issue templates (`bug_report.yml`,
+  `feature_request.yml`, `setup_help.yml`) — standardised GitHub contribution forms.
+- `.github/dependabot.yml` — weekly automated dependency updates for Python (`/backend`),
+  npm (`/frontend`), and GitHub Actions.
+- `.github/workflows/codeql.yml` — CodeQL static analysis for Python and TypeScript on every
+  push/PR to `main` and weekly on a schedule.
+- `PaginationCircuitBreakerError` exception class in `pco_client.py` — raised (and not
+  swallowed) when a single event period exceeds 30 pages during pagination, preventing runaway
+  API fetches if the server-side filter stops working.
+- `DEVELOPMENT.md` local testing section — three-tier table explaining mock preview,
+  dry-run, and production modes.
 
 ### Changed
 
@@ -44,6 +66,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `cloudbuild-api.yaml`: hardcoded GCP project ID replaced with Cloud Build's built-in
   `$PROJECT_ID` substitution variable.
 - `manage.sh`: `.env` is now sourced at startup; domain hint message genericised.
+- `get_checkins_for_event_periods` now fetches via the nested
+  `/events/{event_id}/event_periods/{period_id}/check_ins` endpoint rather than paginating
+  through all historical check-ins for the event. Page count is now proportional to attendance
+  size rather than to the event's full history (~10 pages instead of ~60).
+- PDF temp files are now cleaned up in a `try/finally` block, guaranteeing removal even when
+  a Drive upload or local copy fails mid-loop.
+- `run_rutas` / `run_escuela_dominical` log now shows only the locations that will actually be
+  processed (filtered set) rather than every location that appeared in the API sideload.
 
 ### Security
 
