@@ -55,7 +55,7 @@ pip install -r requirements.txt -r requirements-web.txt -r requirements-dev.txt
 ## 4. Run the tests
 
 ```bash
-pytest          # 185 backend tests, no credentials required
+pytest          # 219 backend tests, no credentials required
 ruff check .    # linter
 ```
 
