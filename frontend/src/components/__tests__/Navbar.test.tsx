@@ -11,7 +11,7 @@ describe('Navbar', () => {
   })
   it('renders the site title', () => {
     renderWithProviders(<Navbar />)
-    expect(screen.getByText('IBL Roster Administrador')).toBeInTheDocument()
+    expect(screen.getByText('Roster Administrador')).toBeInTheDocument()
   })
 
   it('renders language toggle buttons', () => {

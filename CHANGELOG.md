@@ -12,6 +12,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `docs/` folder with full documentation: `getting-started.md`, `configuration.md`,
+  `deployment-gcp.md`, `sample-data.md`, and `IBL.md` (church-specific operational notes).
+- `ALLOWED_GOOGLE_DOMAINS` environment variable — controls which Google Workspace domains
+  can log in to the web UI. Empty value allows any authenticated Google account (no domain
+  restriction). Previously hardcoded to `iblibertad.org` / `iblibertad.com`.
+- `RUTAS_SUBTITLE`, `CHURCH_VERSE_TEXT`, `CHURCH_VERSE_REF` environment variables — allow
+  churches to customise the bus roster subtitle and PDF footer verse without editing source code.
+- `GCP_PROJECT_ID` and `GCP_SA_EMAIL` environment variables — `manage.sh` now reads these
+  from `.env` instead of prompting on every run. Fallback interactive prompt if not set.
+- `backend/tests/conftest.py` — autouse fixture that clears `GOOGLE_CLIENT_ID` before every
+  test, preventing `.env` values from leaking into the test environment via `load_dotenv`.
+- `backend/logo.png` — generic logo file replacing `ibl_logo.png`; drop in your own PNG to
+  customise the header and web UI footer.
+
+### Changed
+
+- README rewritten: generic opener, Quickstart section, heavy deployment content moved to
+  `docs/deployment-gcp.md`, auto check-in details moved to `docs/IBL.md`.
+- `ALLOWED_DOMAINS` in `api.py` changed from a hardcoded module-level set to a
+  per-request `_get_allowed_domains()` function that reads `ALLOWED_GOOGLE_DOMAINS` from env.
+- `FastAPI` app title changed from `"IBL Planning Center Roster API"` to
+  `"Planning Center Roster API"`.
+- Logo path and route renamed: `ibl_logo.png` → `logo.png` across `api.py`, `config.py`,
+  `Dockerfile`, `setup_gcloud.sh`, `vite.config.ts`, `Footer.tsx`, and `DEVELOPMENT.md`.
+- Web UI login title: `"IBL Roster"` → `"Church Roster"`.
+- Web UI nav title: `"IBL Roster Administrador"` → `"Roster Administrador"`.
+- Web UI login hint text: hardcoded IBL domain message → generic "authorised Google accounts" text.
+- `cloudbuild-api.yaml`: hardcoded GCP project ID replaced with Cloud Build's built-in
+  `$PROJECT_ID` substitution variable.
+- `manage.sh`: `.env` is now sourced at startup; domain hint message genericised.
+
 ### Security
 
 - Removed `.env` from git tracking — it was accidentally committed from the first commit. `.env.example`

@@ -16,7 +16,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from planning_center_reports.config import GOOGLE_DRIVE_PARENT_FOLDER_ID
+from planning_center_reports.config import GOOGLE_DRIVE_PARENT_FOLDER_ID, RUTAS_SUBTITLE
 from planning_center_reports.drive_client import (
     get_drive_service,
     get_or_create_folder,
@@ -304,7 +304,7 @@ def run_rutas(weeks: int = 5):
 
         addr_pdf  = generate_address_pdf(location_name, attendees, "Direcciones-Roster.pdf")
         lista_pdf = generate_simple_roster_pdf(
-            location_name, "Ministerio de Autobuses", attendees, "Roster.pdf"
+            location_name, RUTAS_SUBTITLE, attendees, "Roster.pdf"
         )
 
         folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)

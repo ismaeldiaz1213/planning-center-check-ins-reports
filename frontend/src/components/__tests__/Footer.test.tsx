@@ -21,8 +21,8 @@ describe('Footer', () => {
     expect(screen.queryByText(/©/)).not.toBeInTheDocument()
   })
 
-  it('renders the IBL logo image', () => {
+  it('renders the church logo image', () => {
     renderWithProviders(<Footer />)
-    expect(screen.getByAltText('IBL Logo')).toBeInTheDocument()
+    expect(screen.getByAltText('Church Logo')).toBeInTheDocument()
   })
 })

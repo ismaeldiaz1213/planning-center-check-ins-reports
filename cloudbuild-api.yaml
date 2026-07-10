@@ -1,11 +1,12 @@
 # cloudbuild-api.yaml
 #
 # Builds and pushes the API service Docker image to Artifact Registry.
+# $PROJECT_ID is a Cloud Build built-in — it resolves from the --project flag.
 #
 # Submit with:
 #   gcloud builds submit \
 #     --config cloudbuild-api.yaml \
-#     --project ibl-planning-center-check-ins
+#     --project YOUR_GCP_PROJECT_ID
 #
 # Prerequisites (run locally before submitting):
 #   cd frontend && npm run build   ← ensures backend/static/ is present in context
@@ -17,8 +18,8 @@ steps:
       - -f
       - Dockerfile.api
       - -t
-      - us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster-api:latest
+      - us-central1-docker.pkg.dev/$PROJECT_ID/roster-repo/roster-api:latest
       - .
 
 images:
-  - us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster-api:latest
+  - us-central1-docker.pkg.dev/$PROJECT_ID/roster-repo/roster-api:latest

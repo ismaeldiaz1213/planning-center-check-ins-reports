@@ -199,7 +199,7 @@ The Vite proxy forwards:
 
 - `GET/POST /api/*`       → FastAPI at port 8000
 - `GET /previews/*.pdf`   → FastAPI static file mount
-- `GET /ibl_logo.png`     → FastAPI
+- `GET /logo.png`         → FastAPI
 
 No CORS configuration is needed because Vite handles the proxy in development.
 The backend only has CORS enabled for `localhost:5173` and `localhost:3000`.
@@ -255,9 +255,9 @@ This updates the `--args` on the Cloud Run jobs. The existing image is reused.
 /app/
   main.py
   planning_center_reports/
-  ibl_logo.png
+  logo.png
   assets/
-  credentials.json
+  (credentials.json supplied at runtime — not baked in)
 ```
 
 The image does **not** contain `api.py`, `preview.py`, `tests/`, or anything

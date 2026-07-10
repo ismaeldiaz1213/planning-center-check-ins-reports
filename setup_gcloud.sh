@@ -53,7 +53,7 @@ echo -e "${BOLD}── Step 1: Checking prerequisites ────────�
 command -v gcloud &>/dev/null || error "gcloud not found. Install from https://cloud.google.com/sdk/docs/install"
 success "gcloud found"
 
-for f in main.py ibl_logo.png credentials.json Dockerfile requirements.txt; do
+for f in main.py logo.png credentials.json Dockerfile requirements.txt; do
     [[ -f "$f" ]] || error "Missing required file: $f — run this from your project folder."
     success "Found $f"
 done

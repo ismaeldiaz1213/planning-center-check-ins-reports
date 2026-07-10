@@ -32,7 +32,7 @@ BASE_URL = "https://api.planningcenteronline.com"
 # Resolved relative to this file so paths work both locally and inside Docker.
 _HERE      = os.path.abspath(os.path.dirname(__file__))
 _ROOT      = os.path.dirname(_HERE)            # project root (one level up)
-LOGO_PATH  = os.path.join(_ROOT, "ibl_logo.png")
+LOGO_PATH  = os.path.join(_ROOT, "logo.png")
 ASSETS_DIR = os.path.join(_ROOT, "assets")    # theme image assets
 
 # ── Page layout (landscape Letter = 792 × 612 pts) ───────────────────────────
@@ -69,8 +69,12 @@ YELLOW_WARN = colors.HexColor("#FFF176")   # missing-data highlight
 GOLD_STAR   = colors.HexColor("#F5A623")   # default visitor dot
 
 # ── Footer text ───────────────────────────────────────────────────────────────
-VERSE_TEXT = '"Id por todo el mundo y predicad el evangelio a toda criatura"'
-VERSE_REF  = "Marcos 16:15 — RV1960"
+VERSE_TEXT     = os.getenv(
+    "CHURCH_VERSE_TEXT",
+    '"Id por todo el mundo y predicad el evangelio a toda criatura"',
+)
+VERSE_REF      = os.getenv("CHURCH_VERSE_REF", "Marcos 16:15 — RV1960")
+RUTAS_SUBTITLE = os.getenv("RUTAS_SUBTITLE", "Ministerio de Autobuses")
 
 # ── Spanish month names (used when printing the generation date) ──────────────
 MESES_ES = {
@@ -92,7 +96,7 @@ MESES_ABREV = {
 # campaign_icon — filename within ASSETS_DIR to display beside the campaign
 #                 label in the page header. Set to None for no image.
 THEMES = {
-    # Default IBL navy/blue — no campaign label
+    # Default navy/blue — no campaign label
     None: {
         "title":         colors.HexColor("#0D1F5C"),
         "subtitle":      colors.HexColor("#1a4b9c"),

@@ -521,18 +521,21 @@ class TestAuth:
 
     def test_protected_route_returns_403_for_disallowed_domain(self, monkeypatch):
         monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        monkeypatch.setenv("ALLOWED_GOOGLE_DOMAINS", "iblibertad.org,iblibertad.com")
         with patch("google.oauth2.id_token.verify_oauth2_token", return_value={"email": "user@gmail.com"}):
             resp = client.get("/api/settings", headers={"Authorization": "Bearer valid-token"})
         assert resp.status_code == 403
 
     def test_allows_iblibertad_org_account(self, monkeypatch):
         monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        monkeypatch.setenv("ALLOWED_GOOGLE_DOMAINS", "iblibertad.org,iblibertad.com")
         with patch("google.oauth2.id_token.verify_oauth2_token", return_value={"email": "admin@iblibertad.org"}):
             resp = client.get("/api/settings", headers={"Authorization": "Bearer valid-token"})
         assert resp.status_code == 200
 
     def test_allows_iblibertad_com_account(self, monkeypatch):
         monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        monkeypatch.setenv("ALLOWED_GOOGLE_DOMAINS", "iblibertad.org,iblibertad.com")
         with patch("google.oauth2.id_token.verify_oauth2_token", return_value={"email": "admin@iblibertad.com"}):
             resp = client.get("/api/settings", headers={"Authorization": "Bearer valid-token"})
         assert resp.status_code == 200

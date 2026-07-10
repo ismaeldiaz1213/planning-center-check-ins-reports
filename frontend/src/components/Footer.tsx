@@ -6,7 +6,7 @@ export default function Footer() {
 
   return (
     <footer className={styles.footer}>
-      <img src="/ibl_logo.png" alt="IBL Logo" className={styles.logo} />
+      <img src="/logo.png" alt="Church Logo" className={styles.logo} />
       <div className={styles.name}>{t('footer.church')}</div>
       <div className={styles.sub}>{t('footer.location')}</div>
     </footer>

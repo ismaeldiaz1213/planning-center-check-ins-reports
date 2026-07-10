@@ -19,6 +19,7 @@ import os
 import subprocess
 
 import planning_center_reports.config as config
+from planning_center_reports.config import RUTAS_SUBTITLE
 from planning_center_reports.pdf.rosters import generate_address_pdf, generate_simple_roster_pdf
 
 # ── Mock data ─────────────────────────────────────────────────────────────────
@@ -226,7 +227,7 @@ def main():
 
         if args.type in ("roster", "both", "all"):
             path = os.path.join(out_dir, f"{slug}_Roster.pdf")
-            generate_simple_roster_pdf("Ruta 1 - Bus", "Ministerio de Autobuses", MOCK_ATTENDEES, path)
+            generate_simple_roster_pdf("Ruta 1 - Bus", RUTAS_SUBTITLE, MOCK_ATTENDEES, path)
             print(f"  ✓ {os.path.basename(path)}")
             generated.append(path)
 
