@@ -19,7 +19,7 @@ vi.mock('../../auth/AuthContext', () => ({
 describe('LoginOverlay', () => {
   it('renders the title', () => {
     renderWithProviders(<LoginOverlay />)
-    expect(screen.getByText('IBL Roster')).toBeInTheDocument()
+    expect(screen.getByText('Church Roster')).toBeInTheDocument()
   })
 
   it('renders the subtitle', () => {
@@ -29,8 +29,7 @@ describe('LoginOverlay', () => {
 
   it('renders the domain restriction hint', () => {
     renderWithProviders(<LoginOverlay />)
-    expect(screen.getByText(/iblibertad\.org/i)).toBeInTheDocument()
-    expect(screen.getByText(/iblibertad\.com/i)).toBeInTheDocument()
+    expect(screen.getByText(/authorised google accounts/i)).toBeInTheDocument()
   })
 
   it('renders the Google sign-in button', () => {

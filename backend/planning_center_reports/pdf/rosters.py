@@ -28,6 +28,7 @@ from planning_center_reports.config import (
     ED_HEADERS,
     SR_COL_WIDTHS,
     SR_HEADERS,
+    RUTAS_SUBTITLE,
 )
 from planning_center_reports.models import (
     _complex_key,
@@ -85,7 +86,7 @@ def generate_address_pdf(location_name: str, attendees: list, filename: str = "D
     def new_page(is_first: bool) -> float:
         if not is_first:
             c.showPage()
-        return _draw_page_header(c, location_name, "Ministerio de Autobuses", gen_dt, visitor_count)
+        return _draw_page_header(c, location_name, RUTAS_SUBTITLE, gen_dt, visitor_count)
 
     cursor_y  = new_page(is_first=True)
     rows_left = _rows_available(is_first_page=True)

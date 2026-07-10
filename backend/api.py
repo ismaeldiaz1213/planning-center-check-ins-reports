@@ -3,7 +3,7 @@
 # FastAPI server providing:
 #   - REST API under /api/*
 #   - Static PDF serving under /previews/*
-#   - IBL logo served at /ibl_logo.png
+#   - Church logo served at /logo.png
 #   - Built React SPA served from backend/static/ when present
 #
 # Run from the project root or backend/ directory:
@@ -35,7 +35,7 @@ PROJECT_DIR  = BACKEND_DIR.parent                # project root
 ENV_PATH     = PROJECT_DIR / ".env"
 PREVIEWS_DIR = BACKEND_DIR / "previews"
 STATIC_DIR   = BACKEND_DIR / "static"
-LOGO_PATH    = BACKEND_DIR / "ibl_logo.png"
+LOGO_PATH    = BACKEND_DIR / "logo.png"
 
 # ── .env helpers ───────────────────────────────────────────────────────────────
 
@@ -90,10 +90,17 @@ def _get_allowed_origins() -> list[str]:
 
 
 # ── Authentication ────────────────────────────────────────────────────────────
-# Access is restricted to Google accounts whose email domain is in ALLOWED_DOMAINS.
 # Set GOOGLE_CLIENT_ID (OAuth 2.0 Web Client ID) to enable auth.
 # When GOOGLE_CLIENT_ID is not set (local dev), all API routes are open.
-ALLOWED_DOMAINS = {"iblibertad.org", "iblibertad.com"}
+# Set ALLOWED_GOOGLE_DOMAINS to a comma-separated list of domains to restrict
+# access (e.g. "mychurch.org"). Leave unset to allow any Google account.
+
+
+def _get_allowed_domains() -> set[str]:
+    raw = os.environ.get("ALLOWED_GOOGLE_DOMAINS", "").strip()
+    if not raw:
+        return set()
+    return {d.strip().lower() for d in raw.split(",") if d.strip()}
 
 
 def _verify_google_token(authorization: Optional[str] = Header(default=None)) -> dict:
@@ -110,13 +117,14 @@ def _verify_google_token(authorization: Optional[str] = Header(default=None)) ->
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
     email = idinfo.get("email", "")
-    domain = email.split("@")[-1] if "@" in email else ""
-    if domain not in ALLOWED_DOMAINS:
+    domain = email.split("@")[-1].lower() if "@" in email else ""
+    allowed = _get_allowed_domains()
+    if allowed and domain not in allowed:
         raise HTTPException(status_code=403, detail="Access restricted to authorised accounts")
     return idinfo
 
 # ── App ────────────────────────────────────────────────────────────────────────
-app = FastAPI(title="IBL Roster API", version="1.0.0")
+app = FastAPI(title="Planning Center Roster API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -131,7 +139,7 @@ PREVIEWS_DIR.mkdir(exist_ok=True)
 app.mount("/previews", StaticFiles(directory=str(PREVIEWS_DIR)), name="previews")
 
 
-@app.get("/ibl_logo.png", include_in_schema=False)
+@app.get("/logo.png", include_in_schema=False)
 def serve_logo():
     if not LOGO_PATH.exists():
         raise HTTPException(status_code=404, detail="Logo not found")

@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/main.py .
 COPY backend/planning_center_reports/ planning_center_reports/
-COPY backend/ibl_logo.png .
+COPY backend/logo.png .
 COPY backend/assets/ assets/
 
 # credentials.json must be supplied at runtime via a mounted secret or volume.

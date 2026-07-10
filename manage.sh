@@ -11,12 +11,27 @@
 
 set -e
 
-PROJECT_ID="ibl-planning-center-check-ins"
+# Load .env so GCP_PROJECT_ID, GCP_SA_EMAIL, GOOGLE_CLIENT_ID, etc. are available.
+if [[ -f ".env" ]]; then
+    set -a
+    # shellcheck source=.env
+    source .env
+    set +a
+fi
+
+PROJECT_ID="${GCP_PROJECT_ID:-}"
+SA_EMAIL="${GCP_SA_EMAIL:-}"
+if [[ -z "$PROJECT_ID" ]]; then
+    read -rp "  GCP_PROJECT_ID not set in .env — enter your GCP project ID: " PROJECT_ID
+fi
+if [[ -z "$SA_EMAIL" ]]; then
+    read -rp "  GCP_SA_EMAIL not set in .env — enter your service account email: " SA_EMAIL
+fi
+
 REGION="us-central1"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster:latest"
 API_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster-api:latest"
 API_SERVICE_NAME="roster-api"
-SA_EMAIL="ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccount.com"
 SECRET_ENV="PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
@@ -422,14 +437,11 @@ deploy_api_service() {
     success "API image pushed to Artifact Registry."
     echo ""
 
-    # Read GOOGLE_CLIENT_ID from .env, or prompt if missing.
-    local google_client_id=""
-    if [[ -f ".env" ]]; then
-        google_client_id=$(grep "^GOOGLE_CLIENT_ID=" .env 2>/dev/null | cut -d= -f2- | xargs) || true
-    fi
+    # GOOGLE_CLIENT_ID is sourced from .env at startup; prompt if still missing.
+    local google_client_id="${GOOGLE_CLIENT_ID:-}"
     if [[ -z "$google_client_id" ]]; then
         echo ""
-        info "Google OAuth restricts access to iblibertad.org / iblibertad.com accounts."
+        info "Google OAuth restricts access to domains in ALLOWED_GOOGLE_DOMAINS (blank = any Google account)."
         read -rp "  Google OAuth Client ID (leave blank to disable auth): " google_client_id
     fi
 

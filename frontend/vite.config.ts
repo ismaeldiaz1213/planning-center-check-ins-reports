@@ -12,7 +12,7 @@ export default defineConfig({
     proxy: {
       '/api':         'http://localhost:8000',
       '/previews':    'http://localhost:8000',
-      '/ibl_logo.png':'http://localhost:8000',
+      '/logo.png':    'http://localhost:8000',
     },
   },
   build: {
