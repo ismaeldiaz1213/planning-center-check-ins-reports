@@ -12,6 +12,9 @@ COPY backend/main.py .
 COPY backend/planning_center_reports/ planning_center_reports/
 COPY backend/ibl_logo.png .
 COPY backend/assets/ assets/
-COPY credentials.json .
+
+# credentials.json must be supplied at runtime via a mounted secret or volume.
+# Cloud Run: mount via Secret Manager (--set-secrets=credentials.json=...).
+# Local dev: bind-mount with -v $(pwd)/credentials.json:/app/credentials.json
 
 ENTRYPOINT ["python", "main.py"]

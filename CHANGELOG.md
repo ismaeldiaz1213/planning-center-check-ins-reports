@@ -4,13 +4,27 @@ All notable changes to this project are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+> **Note:** Versions v0.0.1 through v0.0.11 are internal production releases predating the open-source
+> launch of this project. They are preserved here for historical context. The public open-source release
+> begins with v0.1.0.
+
 ---
 
 ## [Unreleased]
 
+### Security
+
+- Removed `.env` from git tracking — it was accidentally committed from the first commit. `.env.example`
+  with obvious placeholder values now serves as the setup template.
+- Removed `COPY credentials.json` from both `Dockerfile` and `Dockerfile.api` — Google service account
+  keys are no longer baked into Docker images. Credentials must now be supplied at runtime via a mounted
+  secret or Secret Manager (see `SECURITY.md` for Cloud Run instructions).
+- Added `SECURITY.md` — documents the vulnerability reporting process, sensitive data policy, and
+  credential rotation steps for Planning Center, Google service accounts, and Google OAuth.
+
 ---
 
-## [2.6.0] — 2026-05-21
+## [v0.0.11] — 2026-05-21
 
 ### Added
 
@@ -49,7 +63,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [2.5.0] - 2026-05-21
+## [v0.0.10] - 2026-05-21
 
 ## Added
 
@@ -93,7 +107,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [2.4.1] — 2026-05-19
+## [v0.0.9] — 2026-05-19
 
 ### Added
 
@@ -147,7 +161,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [2.4.0] — 2026-05-05
+## [v0.0.8] — 2026-05-05
 
 Codebase split into `backend/` and `frontend/` directories. Experimental web UI
 added for testing — the Cloud Run pipeline and `manage.sh` workflow are
@@ -175,7 +189,7 @@ unchanged for production use.
 
 ---
 
-## [2.3.0] — 2026-05-05
+## [v0.0.7] — 2026-05-05
 
 ### Added
 
@@ -207,7 +221,7 @@ unchanged for production use.
 
 ---
 
-## [2.2.0] — 2026-05-02
+## [v0.0.6] — 2026-05-02
 
 Major internal restructuring. Behaviour and PDF output are unchanged — this
 release is purely about code organisation, testability, and CI.
@@ -245,7 +259,7 @@ release is purely about code organisation, testability, and CI.
 
 ---
 
-## [2.1.0] — 2026-03-29
+## [v0.0.5] — 2026-03-29
 
 ### Added
 
@@ -267,7 +281,7 @@ release is purely about code organisation, testability, and CI.
 
 ---
 
-## [2.0.0] — 2026-03-19
+## [v0.0.4] — 2026-03-19
 
 Major overhaul. Switched from a single PDF per location to a full themed roster system with visitor detection and attendance tracking.
 
@@ -299,12 +313,12 @@ Major overhaul. Switched from a single PDF per location to a full themed roster 
 - Cloud Run task timeout was 600s (10 min) — increased to 3600s (1 hour). This was causing silent failures for large check-in databases.
 - `credentials.json` excluded from Docker builds by gcloud reading `.gitignore`. Fixed by creating `.gcloudignore` that only excludes `.env`.
 - `entrypoint.sh` caused container startup failures due to Windows line endings — removed in favour of calling Python directly from the Dockerfile.
-- Service account mismatch — Cloud Run was running as the default compute SA which had no Drive access. Jobs now run as `ministry-account-pc`.
+- Service account mismatch — Cloud Run was running as the default compute SA which had no Drive access. Jobs now run as the correct ministry service account.
 - `get_person_details()` now catches `SSLError`, `ReadTimeout`, `Timeout`, and `ConnectionError` in a single handler with exponential backoff (up to 7 retries).
 
 ---
 
-## [1.2.0] — 2026-03-14
+## [v0.0.3] — 2026-03-14
 
 ### Added
 
@@ -335,7 +349,7 @@ Major overhaul. Switched from a single PDF per location to a full themed roster 
 
 ---
 
-## [1.1.0] — 2026-03-10
+## [v0.0.2] — 2026-03-10
 
 ### Added
 
@@ -359,9 +373,9 @@ Major overhaul. Switched from a single PDF per location to a full themed roster 
 
 ---
 
-## [1.0.0] — 2026-03-07
+## [v0.0.1] — 2026-03-07
 
-Initial release.
+Initial working version.
 
 ### Added
 
@@ -372,4 +386,3 @@ Initial release.
 - Uploads PDFs to Google Drive Shared Drive, overwriting previous version.
 - Creates location subfolders automatically if they don't exist.
 - `.env` support via `python-dotenv`.
-

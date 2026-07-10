@@ -3,9 +3,10 @@
 # All Google Drive interaction lives here: authenticating with the service
 # account, finding/creating subfolders, and uploading (or replacing) PDF files.
 #
-# Authentication uses a credentials.json service-account key that is baked into
-# the Docker image at build time. The service account must have Editor access to
-# the target Drive folder.
+# Authentication uses a credentials.json service-account key. The file must be
+# present at the path resolved by _CREDS_PATH at runtime — it is never baked into
+# the Docker image. Supply it via a mounted secret (Cloud Run) or a bind-mount
+# (local Docker). The service account must have Editor access to the target Drive folder.
 
 import os
 
