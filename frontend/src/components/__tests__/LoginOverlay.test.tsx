@@ -29,7 +29,7 @@ describe('LoginOverlay', () => {
 
   it('renders the domain restriction hint', () => {
     renderWithProviders(<LoginOverlay />)
-    expect(screen.getByText(/authorised google accounts/i)).toBeInTheDocument()
+    expect(screen.getByText(/autorizadas/i)).toBeInTheDocument()
   })
 
   it('renders the Google sign-in button', () => {
