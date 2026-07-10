@@ -209,15 +209,14 @@ curl -u YOUR_APP_ID:YOUR_SECRET \
 
 ### Step 2 — Google Service Account
 
-The project uses:
-`ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccount.com`
+Create a service account for the project in Google Cloud Console:
 
-To generate a new key:
-1. Go to **Cloud Console → IAM → Service Accounts**
-2. Click the account → **Keys** tab → **Add Key → JSON**
-3. Download, rename to `credentials.json`, place in project root
+1. Go to **Cloud Console → IAM → Service Accounts → Create Service Account**
+2. Give it a name (e.g. `ministry-roster-account`)
+3. Click the account → **Keys** tab → **Add Key → JSON**
+4. Download, rename to `credentials.json`, place in project root
 
-The service account needs **Editor** access to your Google Drive roster folder. Right-click the folder → **Share** → paste the email → set to **Editor**.
+The service account needs **Editor** access to your Google Drive roster folder. Right-click the folder → **Share** → paste the service account email → set to **Editor**.
 
 ### Step 3 — Local `.env` File
 
@@ -258,7 +257,7 @@ chmod +x setup_gcloud.sh
 
 The script walks through everything interactively — project setup, API enablement, secret storage, Docker build, job creation, and scheduling.
 
-> ⚠️ `credentials.json` is baked into the Docker image at build time. The `.gcloudignore` file ensures gcloud includes it even though `.gitignore` excludes it from git. **Never commit `credentials.json`.**
+> `credentials.json` is **not** baked into the Docker image. It must be supplied at runtime via Secret Manager. `setup_gcloud.sh` handles this for you. **Never commit `credentials.json`.**
 
 ---
 
@@ -339,18 +338,18 @@ When you edit any file in `planning_center_reports/` (or `main.py`), deploy with
 # Option A — management menu
 ./manage.sh → option 6
 
-# Option B — manual
+# Option B — manual (replace YOUR_PROJECT with your GCP project ID)
 gcloud builds submit \
-    --tag us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster:latest \
-    --project=ibl-planning-center-check-ins
+    --tag us-central1-docker.pkg.dev/YOUR_PROJECT/roster-repo/roster:latest \
+    --project=YOUR_PROJECT
 
 gcloud run jobs update roster-rutas \
-    --image=us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster:latest \
-    --region=us-central1 --project=ibl-planning-center-check-ins
+    --image=us-central1-docker.pkg.dev/YOUR_PROJECT/roster-repo/roster:latest \
+    --region=us-central1 --project=YOUR_PROJECT
 
 gcloud run jobs update roster-escuela-dominical \
-    --image=us-central1-docker.pkg.dev/ibl-planning-center-check-ins/roster-repo/roster:latest \
-    --region=us-central1 --project=ibl-planning-center-check-ins
+    --image=us-central1-docker.pkg.dev/YOUR_PROJECT/roster-repo/roster:latest \
+    --region=us-central1 --project=YOUR_PROJECT
 ```
 
 > You must run **both** the build and the job update. Building alone does not update the running jobs.
@@ -361,11 +360,11 @@ gcloud run jobs update roster-escuela-dominical \
 
 Via `manage.sh` → option 7 — pick from the menu, no rebuild needed.
 
-Or manually:
+Or manually (replace `YOUR_PROJECT` with your GCP project ID):
 ```bash
 gcloud run jobs update roster-rutas \
     --args="Rutas,--theme,primavera" \
-    --region=us-central1 --project=ibl-planning-center-check-ins
+    --region=us-central1 --project=YOUR_PROJECT
 ```
 
 > **Note:** Cloud Run `--args` is a comma-separated list of individual tokens. `--theme primavera` (with a space) is wrong — it becomes a single unrecognised argument. Use `--theme,primavera` (comma-separated) instead.
@@ -374,7 +373,7 @@ To revert to default:
 ```bash
 gcloud run jobs update roster-rutas \
     --args="Rutas" \
-    --region=us-central1 --project=ibl-planning-center-check-ins
+    --region=us-central1 --project=YOUR_PROJECT
 ```
 
 ---
@@ -429,10 +428,11 @@ python auto_checkin.py
 ## Security
 
 - **Never commit** `.env` or `credentials.json` — both are in `.gitignore`
-- `credentials.json` lives in the Docker image which is private to your Artifact Registry
+- `credentials.json` is supplied at runtime via Secret Manager — it is **not** baked into any Docker image
 - PCO credentials live in Google Secret Manager — never in the image
 - Rotate your PCO token at **https://api.planningcenteronline.com/oauth/applications** if exposed
 - Rotate your service account key in Cloud Console → IAM → Service Accounts if exposed
+- See [SECURITY.md](SECURITY.md) for the full security policy and vulnerability reporting process
 
 ---
 
