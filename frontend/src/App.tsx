@@ -45,13 +45,17 @@ function AppShell() {
 
 export default function App() {
   const [clientId, setClientId] = useState<string>('')
+  const [demoMode, setDemoMode] = useState(false)
   const [authLoading, setAuthLoading] = useState(true)
 
   useEffect(() => {
     fetch('/api/auth/config')
       .then(r => r.json())
-      .then(data => setClientId(data.google_client_id ?? ''))
-      .catch(() => setClientId(''))
+      .then(data => {
+        setClientId(data.google_client_id ?? '')
+        setDemoMode(data.demo_mode ?? false)
+      })
+      .catch(() => { setClientId(''); setDemoMode(false) })
       .finally(() => setAuthLoading(false))
   }, [])
 
@@ -59,7 +63,7 @@ export default function App() {
 
   return (
     <LanguageProvider>
-      <AuthProvider authRequired={Boolean(clientId)}>
+      <AuthProvider authRequired={Boolean(clientId) && !demoMode} demoMode={demoMode}>
         <GoogleOAuthProvider clientId={clientId}>
           <AppShell />
         </GoogleOAuthProvider>

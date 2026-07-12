@@ -14,6 +14,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `DEMO_MODE` environment variable — set to `true` to run the web UI as a public demo. Auth is
+  bypassed (no Google login required), job runs use mock data via `demo_run.py` (no Planning
+  Center or Drive credentials needed), and settings saves are accepted but not persisted. Deploy
+  a second Cloud Run service with `DEMO_MODE=true` to give developers an interactive preview.
+- `backend/demo_run.py` — demo job script invoked by `api.py` when `DEMO_MODE=true`. Prints
+  realistic log output (with timed pauses so the live stream looks authentic), generates real
+  per-route PDFs from mock data, and skips Drive upload. Accepts `job_type` and `theme` as
+  positional args; also runnable standalone (`python demo_run.py Rutas primavera`).
+- `backend/planning_center_reports/mock_data.py` — shared module holding `MOCK_ATTENDEES` and
+  `MOCK_SUNDAY_DATA`. Both `preview.py` and `demo_run.py` import from here so test data has a
+  single authoritative source.
+- `Makefile` at repo root — `make test` (backend + frontend), `make lint`, `make preview`, `make build` (frontend build → `backend/static/`).
+- `GET /api/auth/config` now returns `demo_mode: bool` alongside `google_client_id`, allowing
+  the frontend to detect demo mode without a separate endpoint.
+- Web UI **DEMO** badge in the navbar — shown automatically when `demo_mode: true` is returned
+  by the server.
+- `demoMode` field added to `AuthContext` — propagated from `/api/auth/config` through
+  `AuthProvider` so any component can read it via `useAuth()`.
+- `manage.sh` **DEMO SERVICE** section (options 25–27) — `25` deploys `roster-api-demo` as a
+  new Cloud Run service for the first time (no PCO/Drive credentials, `DEMO_MODE=true`,
+  `--allow-unauthenticated`); `26` prints the demo URL; `27` opens it in a browser.
+
 - `docs/` folder with full documentation: `getting-started.md`, `configuration.md`,
   `deployment-gcp.md`, `sample-data.md`, and `IBL.md` (church-specific operational notes).
 - `ALLOWED_GOOGLE_DOMAINS` environment variable — controls which Google Workspace domains
@@ -51,6 +73,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   dry-run, and production modes.
 
 ### Changed
+
+- `App.tsx`: `authRequired` now accounts for `demoMode` — when `DEMO_MODE=true`, the login
+  overlay is suppressed even if `GOOGLE_CLIENT_ID` is set, so a demo deployment can set both
+  without locking users out.
+- `preview.py`: mock data moved to `planning_center_reports/mock_data.py`; `preview.py` now
+  imports from there rather than defining it inline.
+- Demo route PDFs are now generated per-route (attendees filtered by route before PDF
+  generation); previously all three Rutas PDFs were identical with all 14 mock attendees.
+- Theme validation in the demo job branch now matches the non-demo branch — invalid themes are
+  stripped to `""` (default) rather than passed through unvalidated to the subprocess.
+- `docs/getting-started.md` step 4 now mentions the `make test` / `make lint` / `make preview` /
+  `make build` shortcuts.
+- `manage.sh` option 16 (Deploy API Service) now automatically updates `roster-api-demo` to the
+  new image after deploying production — no separate step needed to keep the demo in sync.
 
 - README rewritten: generic opener, Quickstart section, heavy deployment content moved to
   `docs/deployment-gcp.md`, auto check-in details moved to `docs/IBL.md`.

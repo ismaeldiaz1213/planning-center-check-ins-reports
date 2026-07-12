@@ -4,7 +4,7 @@
 #
 # All tests mock requests.get — no real HTTP calls are made.
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests

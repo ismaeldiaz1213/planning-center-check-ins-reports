@@ -4,6 +4,17 @@ Automatically generates PDF rosters from [Planning Center](https://www.planningc
 
 ---
 
+## Live Demo
+
+**Not sure if this fits your church's workflow? Try it before setting anything up.**
+
+> **[→ Open the live demo](https://roster-api-demo-k3lvrupgua-uc.a.run.app/)** — no login, no credentials, no download required.
+
+The demo runs the full web UI against mock data: trigger a Rutas or Escuela Dominical job, watch the log output stream in real time, and preview the generated PDFs. It's the real application — just with fake attendees instead of your church data.
+
+
+---
+
 ## Quickstart
 
 ```bash
@@ -44,6 +55,7 @@ See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough.
 - **Attendance rate** — shows how many of the last N weeks each person attended (e.g. `3/5`)
 - **Campaign themes** — seasonal colour schemes for special events
 - **Web UI** — dashboard for triggering jobs, previewing PDFs, editing settings, and viewing logs
+- **Demo mode** — deploy a public `DEMO_MODE=true` instance so developers can evaluate the app without credentials
 - **Google OAuth login** — restrict access to your church's Google Workspace domain
 - **Fully automated** via Google Cloud Run + Cloud Scheduler
 

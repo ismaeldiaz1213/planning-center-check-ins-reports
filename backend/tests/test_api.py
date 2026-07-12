@@ -544,3 +544,82 @@ class TestAuth:
         monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
         resp = client.get("/api/settings", headers={"Authorization": "Basic abc123"})
         assert resp.status_code == 401
+
+    def test_config_includes_demo_mode_false_by_default(self):
+        resp = client.get("/api/auth/config")
+        assert "demo_mode" in resp.json()
+        assert resp.json()["demo_mode"] is False
+
+    def test_demo_mode_bypasses_auth(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id")
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        resp = client.get("/api/settings")
+        assert resp.status_code == 200
+
+    def test_config_returns_demo_mode_true_when_set(self, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        resp = client.get("/api/auth/config")
+        assert resp.json()["demo_mode"] is True
+
+
+# ── Demo mode job routing ─────────────────────────────────────────────────────
+
+class TestDemoMode:
+    def setup_method(self):
+        _clear_jobs()
+
+    @patch("api._run_subprocess")
+    def test_rutas_uses_demo_script_in_demo_mode(self, mock_run, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        client.post("/api/jobs/rutas/run")
+        cmd = mock_run.call_args[0][1]
+        assert "demo_run.py" in cmd
+        assert "Rutas" in cmd
+        assert "--weeks" not in cmd
+
+    @patch("api._run_subprocess")
+    def test_escuela_uses_demo_script_in_demo_mode(self, mock_run, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        client.post("/api/jobs/escuela/run")
+        cmd = mock_run.call_args[0][1]
+        assert "demo_run.py" in cmd
+        assert "Escuela Dominical" in cmd
+
+    @patch("api._write_dotenv")
+    def test_settings_write_is_noop_in_demo_mode(self, mock_write, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        resp = client.put("/api/settings", json={"pco_app_id": "should-not-persist"})
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        mock_write.assert_not_called()
+
+    @patch("api._run_subprocess")
+    def test_rutas_uses_real_script_when_not_demo(self, mock_run, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", False)
+        monkeypatch.delenv("RUTAS_DEFAULT_WEEKS", raising=False)
+        client.post("/api/jobs/rutas/run")
+        cmd = mock_run.call_args[0][1]
+        assert "main.py" in cmd
+        assert "--weeks" in cmd
+
+    @patch("api._run_subprocess")
+    def test_demo_mode_strips_invalid_theme_for_rutas(self, mock_run, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        client.post("/api/jobs/rutas/run", json={"theme": "invalid-theme"})
+        cmd = mock_run.call_args[0][1]
+        assert "invalid-theme" not in cmd
+        assert "" in cmd  # falls back to empty string
+
+    @patch("api._run_subprocess")
+    def test_demo_mode_passes_valid_theme_for_rutas(self, mock_run, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        client.post("/api/jobs/rutas/run", json={"theme": "primavera"})
+        cmd = mock_run.call_args[0][1]
+        assert "primavera" in cmd
+
+    @patch("api._run_subprocess")
+    def test_demo_mode_strips_invalid_theme_for_escuela(self, mock_run, monkeypatch):
+        monkeypatch.setattr(api, "DEMO_MODE", True)
+        client.post("/api/jobs/escuela/run", json={"theme": "notvalid"})
+        cmd = mock_run.call_args[0][1]
+        assert "notvalid" not in cmd

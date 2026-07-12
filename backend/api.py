@@ -29,6 +29,11 @@ from google.auth.transport import requests as _google_requests
 from google.oauth2 import id_token as _google_id_token
 from pydantic import BaseModel, Field
 
+# ── Demo mode ─────────────────────────────────────────────────────────────────
+# Set DEMO_MODE=true to serve a public demo: auth is bypassed, job runs use
+# mock data via demo_run.py, and settings writes are accepted but not persisted.
+DEMO_MODE = os.environ.get("DEMO_MODE", "").lower() in ("1", "true")
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BACKEND_DIR  = Path(__file__).parent.resolve()   # .../backend/
 PROJECT_DIR  = BACKEND_DIR.parent                # project root
@@ -104,6 +109,8 @@ def _get_allowed_domains() -> set[str]:
 
 
 def _verify_google_token(authorization: Optional[str] = Header(default=None)) -> dict:
+    if DEMO_MODE:
+        return {"email": "demo@example.com", "name": "Demo User"}
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     if not client_id:
         return {}  # auth disabled — local dev without OAuth configured
@@ -225,8 +232,11 @@ def health():
 
 @app.get("/api/auth/config")
 def auth_config():
-    """Return the Google OAuth client ID so the frontend can initialise sign-in."""
-    return {"google_client_id": os.environ.get("GOOGLE_CLIENT_ID", "")}
+    """Return the Google OAuth client ID and demo mode flag for the frontend."""
+    return {
+        "google_client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "demo_mode": DEMO_MODE,
+    }
 
 
 @app.get("/api/previews")
@@ -309,6 +319,8 @@ def get_settings(_: dict = Depends(_verify_google_token)):
 @app.put("/api/settings")
 def update_settings(body: SettingsWrite, _: dict = Depends(_verify_google_token)):
     """Persist settings changes to the .env file."""
+    if DEMO_MODE:
+        return {"ok": True}
     updates: dict[str, str] = {}
     if body.pco_app_id is not None:
         updates["PCO_APP_ID"] = body.pco_app_id
@@ -343,9 +355,13 @@ def run_rutas(req: RunJobRequest = RunJobRequest(), _: dict = Depends(_verify_go
     """Trigger python main.py Rutas in the background."""
     weeks = req.weeks or int(os.getenv("RUTAS_DEFAULT_WEEKS", "5"))
     theme = req.theme or os.getenv("RUTAS_DEFAULT_THEME", "")
-    cmd   = [sys.executable, "main.py", "Rutas", "--weeks", str(weeks)]
-    if theme and theme in VALID_THEMES:
-        cmd += ["--theme", theme]
+    if DEMO_MODE:
+        demo_theme = theme if theme in VALID_THEMES else ""
+        cmd = [sys.executable, "demo_run.py", "Rutas", demo_theme]
+    else:
+        cmd = [sys.executable, "main.py", "Rutas", "--weeks", str(weeks)]
+        if theme and theme in VALID_THEMES:
+            cmd += ["--theme", theme]
     job_id = _create_job("rutas")
     _run_subprocess(job_id, cmd)
     return {"job_id": job_id}
@@ -356,9 +372,13 @@ def run_escuela(req: RunJobRequest = RunJobRequest(), _: dict = Depends(_verify_
     """Trigger python main.py 'Escuela Dominical' in the background."""
     weeks = req.weeks or int(os.getenv("ESCUELA_DEFAULT_WEEKS", "5"))
     theme = req.theme or os.getenv("ESCUELA_DEFAULT_THEME", "")
-    cmd   = [sys.executable, "main.py", "Escuela Dominical", "--weeks", str(weeks)]
-    if theme and theme in VALID_THEMES:
-        cmd += ["--theme", theme]
+    if DEMO_MODE:
+        demo_theme = theme if theme in VALID_THEMES else ""
+        cmd = [sys.executable, "demo_run.py", "Escuela Dominical", demo_theme]
+    else:
+        cmd = [sys.executable, "main.py", "Escuela Dominical", "--weeks", str(weeks)]
+        if theme and theme in VALID_THEMES:
+            cmd += ["--theme", theme]
     job_id = _create_job("escuela")
     _run_subprocess(job_id, cmd)
     return {"job_id": job_id}

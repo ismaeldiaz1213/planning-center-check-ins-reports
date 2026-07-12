@@ -1,14 +1,17 @@
+import { useAuth } from '../auth/AuthContext'
 import { useLanguage } from '../i18n/LanguageContext'
 import type { Lang } from '../i18n/translations'
 import styles from './Navbar.module.css'
 
 export default function Navbar() {
   const { lang, setLang, t } = useLanguage()
+  const { demoMode } = useAuth()
 
   return (
     <nav className={styles.nav}>
       <div className={styles.brand}>
         <span className={styles.title}>{t('nav.title')}</span>
+        {demoMode && <span className={styles.demoBadge}>DEMO</span>}
       </div>
 
       <div className={styles.right}>

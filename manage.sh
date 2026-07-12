@@ -32,6 +32,7 @@ REGION="us-central1"
 IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster:latest"
 API_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster-api:latest"
 API_SERVICE_NAME="roster-api"
+DEMO_SERVICE_NAME="roster-api-demo"
 SECRET_ENV="PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
 LOCAL_IMAGE="roster-job-local"
 LOCAL_OUT_DIR="./out"
@@ -93,6 +94,11 @@ show_menu() {
     echo -e "  ${CYAN}22)${NC} Dry-run Rutas — single route"
     echo -e "  ${CYAN}23)${NC} Dry-run Escuela Dominical — all classes"
     echo -e "  ${CYAN}24)${NC} Dry-run Escuela Dominical — single class"
+    echo ""
+    echo -e "  ${BOLD}DEMO SERVICE${NC} ${DIM}(public demo — mock data, no auth)${NC}"
+    echo -e "  ${CYAN}25)${NC} Deploy Demo Service (first-time setup)"
+    echo -e "  ${CYAN}26)${NC} View Demo URL"
+    echo -e "  ${CYAN}27)${NC} Open Demo in browser"
     echo ""
     echo -e "  ${DIM}q)  Quit${NC}"
     echo ""
@@ -471,6 +477,24 @@ deploy_api_service() {
     success "API service deployed."
     echo ""
     _show_api_url
+
+    # If the demo service is already deployed, update it to the same image automatically.
+    if gcloud run services describe "$DEMO_SERVICE_NAME" \
+            --region="$REGION" --project="$PROJECT_ID" &>/dev/null 2>&1; then
+        echo ""
+        info "Updating demo service to new image..."
+        gcloud run deploy "$DEMO_SERVICE_NAME" \
+            --image="$API_IMAGE" \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --service-account="$SA_EMAIL" \
+            --set-env-vars="DEMO_MODE=true" \
+            --allow-unauthenticated \
+            --port=8080 || { warn "Demo service update failed — use option 25 to redeploy it manually."; return; }
+        success "Demo service updated."
+        echo ""
+        _show_demo_url
+    fi
 }
 
 _show_api_url() {
@@ -514,6 +538,75 @@ open_api_in_browser() {
         --format="value(status.url)" 2>/dev/null) || true
     if [[ -z "$url" ]]; then
         warn "Service not deployed yet. Use option 16 to deploy first."
+        return
+    fi
+    xdg-open "$url" 2>/dev/null || echo -e "  Visit: ${CYAN}$url${NC}"
+}
+
+# ── Demo Service ──────────────────────────────────────────────────────────────
+
+deploy_demo_service() {
+    echo ""
+    echo -e "${BOLD}── Deploy Demo Service ──────────────────────────────────────${NC}"
+    echo ""
+    info "Creates a publicly accessible demo (mock data, no login required)."
+    info "Uses the same image as the production API — build it first with option 16."
+    echo ""
+
+    if gcloud run services describe "$DEMO_SERVICE_NAME" \
+            --region="$REGION" --project="$PROJECT_ID" &>/dev/null 2>&1; then
+        warn "Demo service already exists. Option 16 (Deploy API Service) updates it automatically."
+        echo ""
+        _show_demo_url
+        return
+    fi
+
+    info "Deploying demo Cloud Run service..."
+    echo ""
+
+    gcloud run deploy "$DEMO_SERVICE_NAME" \
+        --image="$API_IMAGE" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --service-account="$SA_EMAIL" \
+        --set-env-vars="DEMO_MODE=true" \
+        --allow-unauthenticated \
+        --port=8080 || { error "Demo service deploy failed."; return; }
+
+    success "Demo service deployed."
+    echo ""
+    _show_demo_url
+}
+
+_show_demo_url() {
+    local url
+    url=$(gcloud run services describe "$DEMO_SERVICE_NAME" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --format="value(status.url)" 2>/dev/null) || true
+    if [[ -n "$url" ]]; then
+        echo -e "  ${BOLD}Demo URL:${NC} ${CYAN}$url${NC}"
+    else
+        warn "Could not retrieve demo URL (service may not be deployed yet — use option 25)."
+    fi
+}
+
+view_demo_url() {
+    echo ""
+    echo -e "${BOLD}── Demo Service URL ─────────────────────────────────────────${NC}"
+    echo ""
+    _show_demo_url
+}
+
+open_demo_in_browser() {
+    echo ""
+    local url
+    url=$(gcloud run services describe "$DEMO_SERVICE_NAME" \
+        --region="$REGION" \
+        --project="$PROJECT_ID" \
+        --format="value(status.url)" 2>/dev/null) || true
+    if [[ -z "$url" ]]; then
+        warn "Demo service not deployed yet. Use option 25 to deploy first."
         return
     fi
     xdg-open "$url" 2>/dev/null || echo -e "  Visit: ${CYAN}$url${NC}"
@@ -651,8 +744,11 @@ while true; do
         22) dry_run_single "Rutas" "route" "Ruta 1" ;;
         23) dry_run_job "Escuela Dominical" ;;
         24) dry_run_single "Escuela Dominical" "class" "Nursery" ;;
+        25) deploy_demo_service ;;
+        26) view_demo_url ;;
+        27) open_demo_in_browser ;;
         q|Q) echo ""; info "Goodbye!"; echo ""; exit 0 ;;
-        *)  warn "Invalid option — please choose 1-24 or q." ;;
+        *)  warn "Invalid option — please choose 1-27 or q." ;;
     esac
 
     echo ""
