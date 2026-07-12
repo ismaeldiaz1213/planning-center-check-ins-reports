@@ -2,6 +2,8 @@
 
 This guide walks through setting up the roster system for your church from scratch.
 
+**Before you dive in:** there's a [live demo](https://YOUR_DEMO_URL_HERE) running the full web UI against mock data — no credentials or setup needed. It's the fastest way to decide whether this system fits your workflow.
+
 ---
 
 ## Prerequisites
@@ -55,8 +57,17 @@ pip install -r requirements.txt -r requirements-web.txt -r requirements-dev.txt
 ## 4. Run the tests
 
 ```bash
-pytest          # 219 backend tests, no credentials required
+pytest          # 229 backend tests, no credentials required
 ruff check .    # linter
+```
+
+Or from the project root with `make`:
+
+```bash
+make test       # runs backend (pytest) and frontend (npm test)
+make lint       # ruff + TypeScript type-check
+make preview    # generate sample PDFs with mock data
+make build      # build the React frontend into backend/static/
 ```
 
 All tests use mock data — no Planning Center or Google Drive connection needed.

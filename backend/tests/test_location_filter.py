@@ -6,7 +6,7 @@
 # get_person_details is mocked in all tests because it makes real HTTP requests.
 
 import sys
-from unittest.mock import patch, call
+from unittest.mock import patch
 
 import pytest
 
