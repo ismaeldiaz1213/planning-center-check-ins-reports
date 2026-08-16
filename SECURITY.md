@@ -45,9 +45,13 @@ These are all listed in `.gitignore`. If you accidentally commit any of them, ro
 `credentials.json` and `.env` values should be injected at runtime, never baked into Docker images:
 
 ```bash
-# Mount credentials.json via Secret Manager
+# Mount credentials.json via Secret Manager. The mount path must be outside /app —
+# Cloud Run secret volumes replace the *entire* last directory of the mount path, which
+# would hide the app's own files if mounted straight into /app. Point the app at it with
+# GOOGLE_APPLICATION_CREDENTIALS.
 gcloud run jobs update YOUR_JOB \
-  --set-secrets=credentials.json=google-service-account-key:latest
+  --set-secrets=/secrets/credentials.json=google-service-account-key:latest \
+  --set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/secrets/credentials.json
 
 # Pass env vars via Secret Manager
 gcloud run jobs update YOUR_JOB \

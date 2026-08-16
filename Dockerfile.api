@@ -21,8 +21,13 @@ COPY backend/ .
 
 # credentials.json is NOT baked into the image.
 # Supply it at runtime:
-#   Cloud Run: --set-secrets=credentials.json=google-service-account-key:latest
+#   Cloud Run: mount to a path outside /app — a secret volume replaces the entire last
+#     directory of its mount path, which would hide the files COPYed above if mounted
+#     straight into /app. GOOGLE_APPLICATION_CREDENTIALS tells the app where to find it:
+#       --set-secrets=/secrets/credentials.json=google-service-account-key:latest
+#       --set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/secrets/credentials.json
 #   Local dev: -v $(pwd)/credentials.json:/app/credentials.json
+#     (safe locally — a single-file bind-mount doesn't replace the whole directory)
 
 EXPOSE 8080
 

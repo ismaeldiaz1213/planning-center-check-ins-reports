@@ -33,7 +33,12 @@ IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster:latest"
 API_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/roster-repo/roster-api:latest"
 API_SERVICE_NAME="roster-api"
 DEMO_SERVICE_NAME="roster-api-demo"
-SECRET_ENV="PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
+CRED_MOUNT_PATH="/secrets/credentials.json"
+# credentials.json is mounted outside /app: Cloud Run secret volumes replace the entire
+# last directory of the mount path, which would hide main.py/planning_center_reports/
+# if mounted straight into /app. drive_client.py reads GOOGLE_APPLICATION_CREDENTIALS
+# to find it there instead.
+SECRET_ENV="$CRED_MOUNT_PATH=google-service-account-key:latest,PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
 LOCAL_IMAGE="roster-job-local"
 LOCAL_OUT_DIR="./out"
 
@@ -66,7 +71,7 @@ show_menu() {
     echo -e "  ${CYAN}4)${NC} View current secret values"
     echo ""
     echo -e "  ${BOLD}DEPLOYMENT${NC}"
-    echo -e "  ${CYAN}5)${NC} Update credentials.json (rebuild + redeploy jobs)"
+    echo -e "  ${CYAN}5)${NC} Update credentials.json (upload secret + redeploy jobs)"
     echo -e "  ${CYAN}6)${NC} Deploy updated code to Cloud"
     echo -e "  ${CYAN}7)${NC} Change campaign theme"
     echo ""
@@ -157,8 +162,9 @@ update_credentials() {
     echo ""
     echo -e "${BOLD}── Update credentials.json ─────────────────────────────────${NC}"
     echo ""
-    info "This will rebuild the Docker image with the new credentials.json"
-    info "and recreate both Cloud Run jobs."
+    info "credentials.json is not baked into the Docker image — it's stored in"
+    info "Secret Manager and mounted into the container at runtime. This uploads"
+    info "the new file as a secret version; no image rebuild is needed."
     echo ""
     read -rp "  Path to new credentials.json (default: ./credentials.json): " CREDS_PATH
     CREDS_PATH="${CREDS_PATH:-./credentials.json}"
@@ -168,18 +174,22 @@ update_credentials() {
         return
     fi
 
-    # Copy to project root if it's not already there
-    if [[ "$CREDS_PATH" != "./credentials.json" ]]; then
-        cp "$CREDS_PATH" ./credentials.json
-        success "Copied to ./credentials.json"
+    info "Uploading to Secret Manager..."
+    if gcloud secrets describe google-service-account-key --project="$PROJECT_ID" &>/dev/null; then
+        gcloud secrets versions add google-service-account-key \
+            --data-file="$CREDS_PATH" \
+            --project="$PROJECT_ID"
+    else
+        gcloud secrets create google-service-account-key \
+            --data-file="$CREDS_PATH" \
+            --replication-policy="automatic" \
+            --project="$PROJECT_ID"
+        gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+            --member="serviceAccount:$SA_EMAIL" \
+            --role="roles/secretmanager.secretAccessor" &>/dev/null
     fi
+    success "Secret google-service-account-key updated."
 
-    info "Rebuilding image..."
-    gcloud builds submit \
-        --tag "$IMAGE" \
-        --project="$PROJECT_ID"
-
-    success "Image rebuilt with new credentials."
     _recreate_jobs
 }
 
@@ -245,6 +255,7 @@ _recreate_jobs() {
             --project="$PROJECT_ID" \
             --service-account="$SA_EMAIL" \
             --set-secrets="$SECRET_ENV" \
+            --set-env-vars="GOOGLE_APPLICATION_CREDENTIALS=$CRED_MOUNT_PATH" \
             --args="$event_arg" \
             --task-timeout=3600
 
@@ -431,8 +442,8 @@ deploy_api_service() {
         return
     fi
 
-    if [[ ! -f "credentials.json" ]]; then
-        error "credentials.json not found — it must be present before building."
+    if ! gcloud secrets describe google-service-account-key --project="$PROJECT_ID" &>/dev/null; then
+        error "Secret google-service-account-key not found in Secret Manager — run option 5 first."
         return
     fi
 
@@ -470,7 +481,7 @@ deploy_api_service() {
         --project="$PROJECT_ID" \
         --set-secrets="$SECRET_ENV" \
         --service-account="$SA_EMAIL" \
-        --set-env-vars="GOOGLE_CLIENT_ID=${google_client_id}" \
+        --set-env-vars="GOOGLE_CLIENT_ID=${google_client_id},GOOGLE_APPLICATION_CREDENTIALS=$CRED_MOUNT_PATH" \
         --allow-unauthenticated \
         --port=8080 || { error "Service deploy failed."; return; }
 

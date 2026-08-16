@@ -14,7 +14,12 @@ COPY backend/logo.png .
 COPY backend/assets/ assets/
 
 # credentials.json must be supplied at runtime via a mounted secret or volume.
-# Cloud Run: mount via Secret Manager (--set-secrets=credentials.json=...).
-# Local dev: bind-mount with -v $(pwd)/credentials.json:/app/credentials.json
+# Cloud Run: mount via Secret Manager to a path outside /app — a secret volume replaces
+#   the entire last directory of its mount path, which would hide the files COPYed above
+#   if mounted straight into /app. GOOGLE_APPLICATION_CREDENTIALS tells the app where to
+#   find it:  --set-secrets=/secrets/credentials.json=google-service-account-key:latest
+#             --set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/secrets/credentials.json
+# Local dev: bind-mount a single file with -v $(pwd)/credentials.json:/app/credentials.json
+#   (safe locally — a single-file bind-mount doesn't replace the whole directory).
 
 ENTRYPOINT ["python", "main.py"]
