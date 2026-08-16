@@ -77,6 +77,8 @@ runs without authentication (any request is accepted — local development only)
 | `RUTAS_SUBTITLE` | `Ministerio de Autobuses` | Subtitle shown in bus roster headers |
 | `CHURCH_VERSE_TEXT` | `"Id por todo el mundo y predicad el evangelio a toda criatura"` | Verse text shown in PDF footers |
 | `CHURCH_VERSE_REF` | `Marcos 16:15 — RV1960` | Verse reference shown in PDF footers |
+| `PCO_SESSION_COOKIE` | *(none)* | Only needed for `backend/promote_checkins.py` (grade promotion) — see [docs/grade-promotion.md](grade-promotion.md) |
+| `PCO_CSRF_TOKEN` | *(none)* | Same as above |
 
 ### Examples
 

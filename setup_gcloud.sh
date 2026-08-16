@@ -39,8 +39,8 @@ echo "This script will:"
 echo "  1. Log you into Google Cloud"
 echo "  2. Create (or reuse) a Google Cloud project"
 echo "  3. Enable the required APIs"
-echo "  4. Store your PCO credentials securely in Secret Manager"
-echo "  5. Build and push the Docker image (includes credentials.json)"
+echo "  4. Store your PCO credentials and credentials.json securely in Secret Manager"
+echo "  5. Build and push the Docker image"
 echo "  6. Create Cloud Run Jobs for Rutas + Escuela Dominical"
 echo "  7. Schedule them to run every Monday at 2 AM US Central"
 echo ""
@@ -64,12 +64,13 @@ success "Found planning_center_reports/"
 echo ""
 echo -e "${BOLD}── Step 2: Configuring build file exclusions ───────────────${NC}"
 
-# gcloud auto-reads .gitignore which excludes credentials.json.
-# .gcloudignore overrides that — we only exclude .env here.
+# credentials.json is stored in Secret Manager, not baked into the image —
+# exclude both it and .env from the build context sent to Cloud Build.
 cat > .gcloudignore << 'EOF'
 .env
+credentials.json
 EOF
-success "Created .gcloudignore (credentials.json will be included in builds)"
+success "Created .gcloudignore (credentials.json and .env excluded from builds)"
 
 # ── Step 3: Google Cloud login ────────────────────────────────────────────────
 echo ""
@@ -155,6 +156,19 @@ store_secret "PCO_APP_ID"                    "$PCO_APP_ID"
 store_secret "PCO_SECRET"                    "$PCO_SECRET"
 store_secret "GOOGLE_DRIVE_PARENT_FOLDER_ID" "$DRIVE_FOLDER_ID"
 
+if gcloud secrets describe google-service-account-key --project="$PROJECT_ID" &>/dev/null; then
+    info "Secret google-service-account-key already exists — updating..."
+    gcloud secrets versions add google-service-account-key \
+        --data-file="credentials.json" \
+        --project="$PROJECT_ID"
+else
+    gcloud secrets create google-service-account-key \
+        --data-file="credentials.json" \
+        --replication-policy="automatic" \
+        --project="$PROJECT_ID"
+fi
+success "Stored: google-service-account-key"
+
 # ── Step 7: Service account ───────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}── Step 7: Service account ─────────────────────────────────${NC}"
@@ -208,7 +222,12 @@ success "Image pushed: $IMAGE"
 echo ""
 echo -e "${BOLD}── Step 9: Creating Cloud Run Jobs ─────────────────────────${NC}"
 
-SECRET_ENV="PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
+CRED_MOUNT_PATH="/secrets/credentials.json"
+# credentials.json is mounted outside /app: Cloud Run secret volumes replace the entire
+# last directory of the mount path, which would hide main.py/planning_center_reports/
+# if mounted straight into /app. drive_client.py reads GOOGLE_APPLICATION_CREDENTIALS
+# to find it there instead.
+SECRET_ENV="$CRED_MOUNT_PATH=google-service-account-key:latest,PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
 
 create_job() {
     local job_name=$1
@@ -230,6 +249,7 @@ create_job() {
         --project="$PROJECT_ID" \
         --service-account="$SA_EMAIL" \
         --set-secrets="$SECRET_ENV" \
+        --set-env-vars="GOOGLE_APPLICATION_CREDENTIALS=$CRED_MOUNT_PATH" \
         --args="$event_arg" \
         --task-timeout=3600
 

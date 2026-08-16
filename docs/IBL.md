@@ -21,7 +21,7 @@ This file is the single place where all IBL-specific values are documented.
 |---------|-------|
 | Display name | `ministry-account-pc` |
 | Email | `ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccount.com` |
-| Key file | `credentials.json` (stored in Secret Manager as `google-credentials`) |
+| Key file | `credentials.json` (stored in Secret Manager as `google-service-account-key`) |
 
 ---
 
@@ -99,37 +99,47 @@ The helper detection logic lives in `backend/planning_center_reports/services.py
 
 ---
 
-## Auto check-in (`auto_checkin.py`)
+## Grade promotion (`backend/promote_checkins.py`)
 
-Used to bulk check in members of a PCO Group (e.g. "11th and 12th Grade") when they are
-known to be present but have not been individually checked in through the app.
+Full walkthrough (setup, step-by-step usage, all flags, limitations) lives in
+[docs/grade-promotion.md](grade-promotion.md) — this section only covers what's specific
+to IBL.
 
-Configure at the top of the file:
+IBL's classes are split by gender and don't follow a predictable naming pattern, so
+always run `make promote-checkin-locations` to get exact names rather than guessing.
+Full list as of 2026-08-15:
 
-```python
-EVENT_NAME    = "Escuela Dominical"
-GROUP_NAME    = "11th and 12th Grade"
-LOCATION_NAME = "11th and 12th Grade"
-BATCH_SIZE    = 25
+```
+03 Year Olds
+Pre-K Niños                    Pre-K Niñas
+Kinder Niños                   Kinder Niñas
+1st Grade Boys                 1st Grade Girls
+2nd Grade Boys                 2nd Grade Girls
+3rd Grade Boys                 3rd Grade Girls
+4th Grade Boys                 4th Grade Girls
+5th Grade Boys                 5th Grade Girls
+6th Grade Boys                 6th Grade Girls
+7th Grade Boys                 7th Grade Girls
+8th Grade Boys                 8th Grade Girls
+9th and 10th Grade Boys        9th and 10th Grade Girls
+11th and 12th Grade Class
+College and Career
+Single Adults
+Clase de Parejas
+Clase de Nuevos Creyentes
+Clase de Ancianos (55+)
 ```
 
-**Getting the session cookie:**
+> `03 Year Olds` promotes into **two** destinations (`Pre-K Niños` / `Pre-K Niñas`) split
+> by gender — this tool moves everyone from one location to one location, so that class
+> needs to be split by hand rather than run as a single `promote-checkin` call (see
+> Limitations in the grade-promotion doc).
 
-1. Open **https://check-ins.planningcenteronline.com** while logged in
-2. DevTools (`F12`) → **Application** → **Cookies** → copy `planning_center_session`
-3. In DevTools Console run: `document.querySelector('meta[name=csrf-token]').content`
-
-Add to `.env`:
-```
-PCO_SESSION_COOKIE=your_value
-PCO_CSRF_TOKEN=your_value
-```
-
-```bash
-python auto_checkin.py
-```
-
-> Session cookies expire on browser logout. Grab a fresh one if the script returns 401.
+`backend/groups_to_check_ins.py` (moved from the project root during the `backend/` +
+`frontend/` split — still present, not removed) solves a different problem: bulk
+check-in from a **static PCO Group's membership**, rather than from check-in history.
+Use it for things like checking in a helper roster; use `promote_checkins.py` for
+grade promotion.
 
 ---
 

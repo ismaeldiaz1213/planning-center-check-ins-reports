@@ -7,6 +7,12 @@
 # present at the path resolved by _CREDS_PATH at runtime — it is never baked into
 # the Docker image. Supply it via a mounted secret (Cloud Run) or a bind-mount
 # (local Docker). The service account must have Editor access to the target Drive folder.
+#
+# On Cloud Run the key is mounted from Secret Manager at GOOGLE_APPLICATION_CREDENTIALS
+# rather than /app/credentials.json — Cloud Run secret volumes replace the *entire*
+# last directory in the mount path with the secret volume, which would hide main.py
+# and planning_center_reports/ if mounted directly into /app. Mounting to a dedicated
+# path (e.g. /secrets/credentials.json) avoids that collision.
 
 import os
 
@@ -14,11 +20,15 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# Path to the service-account key file. Resolved relative to the project root
-# so it works both locally and inside the Docker container (/app/credentials.json).
-_CREDS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "credentials.json",
+# Path to the service-account key file. GOOGLE_APPLICATION_CREDENTIALS overrides this
+# (used on Cloud Run, where the secret is mounted outside /app). Otherwise falls back to
+# the project root so it works for local (non-Docker) runs and the local bind-mount.
+_CREDS_PATH = os.environ.get(
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "credentials.json",
+    ),
 )
 _DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 

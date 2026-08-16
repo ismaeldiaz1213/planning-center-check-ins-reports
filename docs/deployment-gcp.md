@@ -54,7 +54,7 @@ SECRETS
   4)  View current secret values
 
 DEPLOYMENT
-  5)  Update credentials.json (rebuild + redeploy jobs)
+  5)  Update credentials.json (upload secret + redeploy jobs)
   6)  Deploy updated code to Cloud (jobs)
   7)  Change campaign theme
 
@@ -186,8 +186,11 @@ To get the service URL after deployment:
 ## Credentials at runtime
 
 `credentials.json` is **not** baked into the Docker image. It is stored in Secret Manager
-and mounted into the container at runtime by Cloud Run. `setup_gcloud.sh` handles this
-configuration for you.
+under the name `google-service-account-key` and mounted into the container at runtime by
+Cloud Run at `/secrets/credentials.json` — outside `/app`, since a Cloud Run secret volume
+replaces the *entire* last directory of its mount path, which would hide `main.py` and
+`planning_center_reports/` if mounted straight into `/app`. The `GOOGLE_APPLICATION_CREDENTIALS`
+env var tells the app where to find it. `setup_gcloud.sh` handles this configuration for you.
 
 To update `credentials.json` after rotating your service account key:
 

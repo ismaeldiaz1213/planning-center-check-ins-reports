@@ -14,6 +14,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `backend/promote_checkins.py` — moves a Sunday school class up a grade in Check-Ins
+  pre-select history ahead of grade-promotion weekend: finds everyone checked into
+  `--from-location` in the last `--weeks` Sundays (default 2) and, skipping anyone at or
+  above `--max-age` (default 20), replays a check-in for each into `--to-location` at
+  `--time` (default `10:00`) for the most recent Sunday. Uses the same internal
+  `bulk_check_ins` endpoint the Check-Ins web app calls (the public PCO API has no
+  create-check-in endpoint), authenticated via `PCO_SESSION_COOKIE`/`PCO_CSRF_TOKEN` from
+  an active browser session. Supports `--list-locations` (discover exact location names)
+  and `--dry-run` (preview without submitting). Complements `backend/groups_to_check_ins.py`
+  (bulk check-in from a static PCO Group — a different source of truth) rather than
+  replacing it; see `docs/IBL.md`.
+- `get_locations`, `get_location_id`, `get_event_times`, `age_from_birthday` in
+  `pco_client.py` — read-only Check-Ins API helpers used by `promote_checkins.py`
+  (`age_from_birthday` also replaces a private copy that lived inside `get_helpers_set`).
+- `make promote-checkin-locations` and `make promote-checkin FROM=... TO=...` — Makefile
+  wrappers around `promote_checkins.py` so each class can be run and verified one at a time.
 - `DEMO_MODE` environment variable — set to `true` to run the web UI as a public demo. Auth is
   bypassed (no Google login required), job runs use mock data via `demo_run.py` (no Planning
   Center or Drive credentials needed), and settings saves are accepted but not persisted. Deploy
@@ -71,6 +87,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   API fetches if the server-side filter stops working.
 - `DEVELOPMENT.md` local testing section — three-tier table explaining mock preview,
   dry-run, and production modes.
+
+### Fixed
+
+- `get_recent_event_periods` in `pco_client.py` ordered and limited event periods by
+  `-created_at`, not `-starts_at`. PCO can create recurring event periods ahead of
+  schedule, so "most recently created" is not reliably "most recent Sunday" — it could
+  even return a future period. Symptom: `promote_checkins.py` was checking people into
+  the wrong Sunday. Now orders by `-starts_at` and explicitly filters out any period
+  whose `starts_at` is in the future. This is shared code, so it also firms up the
+  weekly roster reports (`run_rutas` / `run_escuela_dominical`), which use the same
+  function and could theoretically have picked up a pre-created future period the same
+  way.
+- `roster-rutas` and `roster-escuela-dominical` Cloud Run jobs failing with
+  `FileNotFoundError: /app/credentials.json` on every run since the `Security` cleanup below
+  removed `COPY credentials.json` from the Docker images. That change (correctly) stopped
+  baking the service-account key into images, but `setup_gcloud.sh` and `manage.sh` were never
+  updated to actually mount it from Secret Manager — `SECRET_ENV` only carried `PCO_APP_ID`,
+  `PCO_SECRET`, and `GOOGLE_DRIVE_PARENT_FOLDER_ID`, so no `credentials.json` was ever present
+  in the running container. `setup_gcloud.sh` now stores `credentials.json` as the
+  `google-service-account-key` Secret Manager secret, and both scripts mount it via
+  `--set-secrets=/secrets/credentials.json=google-service-account-key:latest` plus
+  `--set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/secrets/credentials.json`. The mount path is
+  `/secrets/credentials.json`, not `/app/credentials.json` as `SECURITY.md` and
+  `docs/deployment-gcp.md` previously (incorrectly) documented — a Cloud Run secret volume
+  replaces the *entire* last directory of its mount path, so mounting into `/app` would have
+  hidden `main.py` and `planning_center_reports/` alongside the ones already COPYed into the
+  image. `drive_client.py` now resolves the key path from `GOOGLE_APPLICATION_CREDENTIALS` when
+  set, falling back to the local-dev path otherwise. `manage.sh` option 5 (Update
+  credentials.json) now uploads the new key to Secret Manager instead of rebuilding an image
+  that never contained it, and `deploy_api_service` checks that the secret exists in Secret
+  Manager instead of requiring a local `credentials.json` file that Docker builds no longer use.
 
 ### Changed
 

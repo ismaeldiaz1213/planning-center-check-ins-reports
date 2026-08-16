@@ -58,6 +58,8 @@ See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough.
 - **Demo mode** — deploy a public `DEMO_MODE=true` instance so developers can evaluate the app without credentials
 - **Google OAuth login** — restrict access to your church's Google Workspace domain
 - **Fully automated** via Google Cloud Run + Cloud Scheduler
+- **Grade promotion** — move a Sunday school class up a grade in Check-Ins pre-select
+  history ahead of promotion weekend (`backend/promote_checkins.py`)
 
 ---
 
@@ -124,6 +126,7 @@ python main.py "Rutas" --theme invierno
 - [Getting Started](docs/getting-started.md) — clone, configure, run tests, generate PDFs
 - [Configuration Reference](docs/configuration.md) — all environment variables, PCO permissions, Drive setup, logo
 - [Deploying to Google Cloud](docs/deployment-gcp.md) — Cloud Run jobs, manage.sh, web UI deploy
+- [Grade Promotion](docs/grade-promotion.md) — moving a class up a grade in Check-Ins pre-select history
 - [Sample Data & Previews](docs/sample-data.md) — preview.py flags and mock data editing
 
 For development workflow (running the test suite, Vite dev server, full-stack local setup),
@@ -139,10 +142,12 @@ see [DEVELOPMENT.md](DEVELOPMENT.md).
 | `SSL EOF / ReadTimeout` | Auto-retries up to 7 times. If persistent, try again later. |
 | `Event 'X' not found` | Event name is case-sensitive — check exact name in PCO Check-Ins. |
 | `No such file: main.py` in Cloud | Job is using a stale image. Run `manage.sh → option 6`. |
+| `FileNotFoundError: credentials.json` in Cloud | Run **both** `manage.sh → option 5` (uploads the key to Secret Manager and points the job's `--set-secrets` at it) **and** `option 6` (rebuilds the image so the code that reads `GOOGLE_APPLICATION_CREDENTIALS` is actually deployed). Option 5 alone updates config only — it doesn't rebuild the image. |
 | PDFs not appearing in Drive | Confirm service account has Editor access to the Drive folder. |
 | Job timed out | Both jobs have a 3600s (1 hour) limit. Should be sufficient for any church size. |
 | Theme not applying | Run both build + job update, or use `manage.sh → option 6` which does both. |
 | `unrecognized arguments: --theme primavera` | `--args` requires comma-separated tokens, not spaces: `--theme,primavera`. |
+| `promote_checkins.py` checks people into the wrong Sunday/time | Confirm `--weeks`/`--time` match what you expect, and run `--list-locations` to rule out a typo'd class name silently matching nothing (it raises instead, but double-check `--from-location`/`--to-location` spelling). |
 
 ---
 
