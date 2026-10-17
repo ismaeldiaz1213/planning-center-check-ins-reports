@@ -1,1 +1,6 @@
-.env
+# Files never sent to Cloud Build. Reuses .gitignore, which already covers the
+# secrets (.env, credentials.json) and frontend/node_modules.
+.gcloudignore
+.git
+.gitignore
+#!include:.gitignore
