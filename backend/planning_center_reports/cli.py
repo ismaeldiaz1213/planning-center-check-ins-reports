@@ -7,7 +7,8 @@
 # ENTRYPOINT ("python main.py") continues to work without any changes to the
 # Dockerfile or Cloud Run job definitions. The positional argument accepts either
 # a report id ("escuela-b") or the PCO event name ("Escuela Dominical"), so
-# existing Cloud Run job arguments keep working unchanged.
+# existing Cloud Run job arguments keep working unchanged. --all runs every
+# enabled report in one process, sharing fetched PCO data between them.
 
 import argparse
 import json
@@ -20,7 +21,7 @@ from planning_center_reports.reports import (
     enabled_reports,
     get_report,
 )
-from planning_center_reports.services import run_report
+from planning_center_reports.services import run_all, run_report
 
 
 def _print_reports(fmt: str) -> None:
@@ -37,14 +38,20 @@ def _print_reports(fmt: str) -> None:
     source = config_path()
     print(f"Config: {source if source else 'built-in defaults (no reports.yaml found)'}")
     for spec in specs:
+        history = (f"since {spec.start_date.isoformat()}" if spec.start_date
+                   else f"rolling {spec.history_weeks} weeks")
         features = [
-            f"outputs={','.join(spec.outputs)}",
-            f"weeks={spec.resolved_weeks()}",
+            f"history={history}",
+            f"active={spec.resolved_weeks()} weeks",
         ]
         if spec.route_source_event:
             features.append(f"routes←{spec.route_source_event}")
-        if spec.helpers_event:
-            features.append(f"helpers←{spec.helpers_event} ({spec.helper_min_age}+)")
+        if spec.volunteer_report:
+            source = (f"{spec.volunteer_event} ({spec.volunteer_min_age}+)" if spec.volunteer_event
+                      else "Volunteer check-ins")
+            features.append(f"volunteers←{source}")
+        if spec.instructions:
+            features.append("instructions")
         if spec.attendance_summary:
             features.append("attendance-summary")
         if spec.drive_folder_prefix:
@@ -57,6 +64,17 @@ def _print_reports(fmt: str) -> None:
         print(f"     features   {'; '.join(features)}")
 
 
+def _apply_theme(theme: str | None) -> None:
+    """Apply a theme globally before any PDF generation begins.
+
+    All PDF functions read config._theme via config.T(), so setting it here is
+    sufficient — no need to pass it through the call stack.
+    """
+    config._theme = config.THEMES[theme]
+    if theme:
+        print(f"Theme: {config._theme['campaign']}", flush=True)
+
+
 def main():
     """Parse CLI arguments and run the requested roster generation pipeline."""
     parser = argparse.ArgumentParser(
@@ -67,6 +85,11 @@ def main():
         nargs="?",
         help="Report id (e.g. 'escuela-b') or PCO event name (e.g. 'Escuela Dominical'). "
              "Run --list-reports to see what is configured.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run every enabled report in one process (what the weekly Cloud Run job does).",
     )
     parser.add_argument(
         "--list-reports",
@@ -83,7 +106,8 @@ def main():
         "--weeks",
         type=int,
         default=None,
-        help="Number of recent weeks to include (default: the report's default_weeks)",
+        help="Active window in Sundays: people seen in the last N are on the list, "
+             "older ones move to 'Hace tiempo' (default: the report's default_weeks)",
     )
     parser.add_argument(
         "--theme",
@@ -115,8 +139,19 @@ def main():
             _print_reports(args.format)
             return
 
+        if args.all:
+            if args.report or args.location or args.weeks:
+                parser.error("--all runs every report with its own settings; "
+                             "drop the report name, --location and --weeks")
+            if args.dry_run:
+                print(f"[dry-run] No files will be uploaded. PDFs will be saved to {args.output_dir}",
+                      flush=True)
+            ok = run_all(dry_run=args.dry_run, output_dir=args.output_dir, theme=args.theme)
+            print("\nDone." if ok else "\nDone with errors.", flush=True)
+            sys.exit(0 if ok else 1)
+
         if not args.report:
-            parser.error("a report id or PCO event name is required (see --list-reports)")
+            parser.error("a report id or PCO event name is required (see --list-reports or --all)")
 
         spec = get_report(args.report)
     except ReportConfigError as exc:
@@ -131,12 +166,7 @@ def main():
     weeks = args.weeks if args.weeks is not None else spec.resolved_weeks()
     theme = args.theme if args.theme is not None else spec.resolved_theme()
 
-    # Apply theme globally before any PDF generation begins.
-    # All PDF functions read config._theme via config.T(), so setting it here
-    # is sufficient — no need to pass it through the call stack.
-    config._theme = config.THEMES[theme]
-    if theme:
-        print(f"Theme: {config._theme['campaign']}", flush=True)
+    _apply_theme(theme)
 
     if args.dry_run:
         print(f"[dry-run] No files will be uploaded. PDFs will be saved to {args.output_dir}",

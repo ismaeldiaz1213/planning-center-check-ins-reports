@@ -1,4 +1,4 @@
 pytest
-ruff
+ruff==0.17.1
 httpx
 fastapi

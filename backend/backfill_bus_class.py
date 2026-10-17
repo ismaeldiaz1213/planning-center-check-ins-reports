@@ -226,7 +226,7 @@ def main():
         print(f"\nChecking {len(assignments[name])} into '{name}'...", flush=True)
         result = bulk_checkin(session, destination_period_id, event_time_id, event_id,
                               location_ids[name], assignments[name])
-        totals = [t + r for t, r in zip(totals, result)]
+        totals = [t + r for t, r in zip(totals, result, strict=True)]
 
     print(f"\nDone. {totals[0]} checked in, {totals[1]} duplicates, {totals[2]} errors.")
 

@@ -1,37 +1,46 @@
 # tests/test_run_report.py
 #
-# Tests for services.run_report — the single pipeline that replaced the separate
-# run_rutas / run_escuela_dominical functions.
+# services.run_report / run_all with the PCO and Drive surface mocked.
 #
-# The point of these tests is the flexibility guarantee: a report that does not
-# declare an optional feature must not make the PCO calls that feature needs.
+# The flexibility guarantee still holds: a report that does not declare an
+# optional feature must not make the PCO calls that feature needs. And the
+# whole point of run_all: shared events are fetched once, not once per report.
 
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
 
 from planning_center_reports.reports import ReportSpec
-from planning_center_reports.services import run_report
+from planning_center_reports.services import RunContext, run_all, run_report
 
-EMPTY_PERSON = {"phone": "", "address": "", "birthday": "", "grade": "", "created_at": ""}
+NOW = datetime.now(UTC)
+PERIODS = [{"id": f"ep{i}", "starts_at": NOW - timedelta(weeks=3 - i, hours=2)} for i in range(4)]
 
 
-def _checkin(person_id, first, last, location_id, ep_id="ep1"):
+def _checkin(person_id, location_id, ep_id="ep3", kind="Regular"):
     return {
-        "attributes": {"first_name": first, "last_name": last},
+        "attributes": {"first_name": "", "last_name": "", "kind": kind, "created_at": ""},
         "relationships": {
             "locations":    {"data": [{"id": location_id}]},
             "person":       {"data": {"id": person_id}},
             "event_period": {"data": {"id": ep_id}},
+            "event_times":  {"data": []},
         },
     }
 
 
-CHECKINS = [
-    _checkin("p1", "Ana", "Lopez", "loc1"),
-    _checkin("p2", "Luis", "Diaz", "loc1"),
+INCLUDED = [
+    {"type": "Location", "id": "loc1", "attributes": {"name": "Clase Primaria"}},
+    {"type": "Person", "id": "p1", "attributes": {"first_name": "Ana", "last_name": "Lopez", "child": True}},
+    {"type": "Person", "id": "p2", "attributes": {"first_name": "Luis", "last_name": "Diaz", "child": True}},
 ]
-INCLUDED = [{"type": "Location", "id": "loc1", "attributes": {"name": "Clase Primaria"}}]
+
+
+def fake_checkins(_event_id, period_ids):
+    (pid,) = period_ids
+    return [_checkin("p1", "loc1", pid), _checkin("p2", "loc1", pid)], INCLUDED
+
 
 MINIMAL_SPEC = ReportSpec(id="ninos", label="Clases de Niños", pco_event="Clases de Niños")
 
@@ -39,184 +48,172 @@ FULL_SPEC = ReportSpec(
     id="escuela-b",
     label='"B" Escuela Dominical',
     pco_event='"B" Escuela Dominical',
-    helpers_event="Junta de Rutas Attendance",
     route_source_event="Rutas",
     show_route=True,
     attendance_summary=True,
+    instructions=True,
+    volunteer_report=True,
     drive_folder_prefix='"B" Escuela Dominical',
 )
 
 
 @pytest.fixture
-def pco(monkeypatch):
-    """Patch the whole PCO surface run_report touches; yields the mock namespace.
+def pco(monkeypatch, tmp_path):
+    """Patch the PCO surface and the PDF writers; yields the mocks.
 
-    `copies` records the destinations _save_pdf_locally would write, since the
-    generator mocks return paths that do not exist on disk.
+    `copies` records where a dry run would save each file.
     """
     copies: list[str] = []
     monkeypatch.setattr("planning_center_reports.services.shutil.copy",
                         lambda src, dest: copies.append(dest))
-    monkeypatch.setattr("planning_center_reports.services.time.sleep", lambda _s: None)
-    with patch("planning_center_reports.services.get_event_id", return_value="ev1") as ev, \
-         patch("planning_center_reports.services.get_recent_event_periods",
-               return_value=(["ep1"], {"ep1": "Abr 6"}, {"ep1": "2025-04-06T00:00:00Z"})), \
+    with patch("planning_center_reports.services.get_event_id", side_effect=lambda n: f"id:{n}") as ev, \
+         patch("planning_center_reports.services.get_event_periods_since", return_value=PERIODS) as per, \
          patch("planning_center_reports.services.get_checkins_for_event_periods",
-               return_value=(CHECKINS, INCLUDED)), \
-         patch("planning_center_reports.services.get_person_details", return_value=EMPTY_PERSON), \
-         patch("planning_center_reports.services.get_helpers_set", return_value=set()) as helpers, \
-         patch("planning_center_reports.services._get_route_mapping", return_value={}) as routes, \
-         patch("planning_center_reports.services.generate_simple_roster_pdf",
-               return_value="/tmp/does-not-exist-simple.pdf") as simple, \
-         patch("planning_center_reports.services.generate_address_pdf",
-               return_value="/tmp/does-not-exist-address.pdf") as address:
-        yield {
-            "event_id": ev, "helpers": helpers, "routes": routes,
-            "simple": simple, "address": address, "copies": copies,
-        }
+               side_effect=fake_checkins) as cks, \
+         patch("planning_center_reports.services.get_guardians", return_value={}) as guardians, \
+         patch("planning_center_reports.services.generate_roster_pdf",
+               side_effect=lambda roster, *a, **k: a[1]) as roster_pdf, \
+         patch("planning_center_reports.services.generate_volunteer_pdf",
+               side_effect=lambda report, label, path: path) as vol_pdf, \
+         patch("planning_center_reports.services.build_instructions_pdf",
+               side_effect=lambda path: path) as instr:
+        yield {"event_id": ev, "periods": per, "checkins": cks, "guardians": guardians,
+               "roster": roster_pdf, "volunteers": vol_pdf, "instructions": instr,
+               "copies": copies, "out": str(tmp_path)}
+
+
+def _dry(spec, pco, **kw):
+    run_report(spec, dry_run=True, output_dir=pco["out"], **kw)
 
 
 # ── Optional features are genuinely optional ──────────────────────────────────
 
 class TestMinimalReportSkipsOptionalWork:
-    def test_never_fetches_helpers(self, pco, tmp_path):
-        run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        pco["helpers"].assert_not_called()
+    def test_only_looks_up_its_own_event(self, pco):
+        _dry(MINIMAL_SPEC, pco)
+        assert [c.args[0] for c in pco["event_id"].call_args_list] == ["Clases de Niños"]
 
-    def test_never_builds_a_route_map(self, pco, tmp_path):
-        run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        pco["routes"].assert_not_called()
-
-    def test_only_looks_up_its_own_event(self, pco, tmp_path):
-        run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        assert [c[0][0] for c in pco["event_id"].call_args_list] == ["Clases de Niños"]
-
-    def test_renders_no_route_column_and_no_summary(self, pco, tmp_path):
-        run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        _, kwargs = pco["simple"].call_args
+    def test_renders_no_route_column_and_no_summary(self, pco):
+        _dry(MINIMAL_SPEC, pco)
+        kwargs = pco["roster"].call_args.kwargs
         assert kwargs["show_route"] is False
-        assert kwargs["sunday_data"] is None
+        assert kwargs["attendance_summary"] is False
 
-    def test_emits_only_the_simple_roster(self, pco, tmp_path):
-        run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        pco["address"].assert_not_called()
-        assert pco["simple"].call_count == 1
+    def test_emits_only_the_roster(self, pco):
+        _dry(MINIMAL_SPEC, pco)
+        assert [p.rsplit("/", 1)[1] for p in pco["copies"]] == ["Roster.pdf"]
+        pco["volunteers"].assert_not_called()
+        pco["instructions"].assert_not_called()
+
+    def test_never_calls_the_people_api_per_person(self, pco):
+        """Details come from check-in sideloads; parents are one batched lookup."""
+        _dry(MINIMAL_SPEC, pco)
+        pco["guardians"].assert_called_once()
+        assert sorted(pco["guardians"].call_args.args[0]) == ["p1", "p2"]
 
 
 class TestFullReportUsesOptionalWork:
-    def test_fetches_helpers_from_the_configured_event(self, pco, tmp_path):
-        run_report(FULL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        args, kwargs = pco["helpers"].call_args
-        assert args[0] == "Junta de Rutas Attendance"
-        assert kwargs["min_age"] == 16
+    def test_builds_a_route_map_from_the_configured_event(self, pco):
+        _dry(FULL_SPEC, pco)
+        assert "Rutas" in [c.args[0] for c in pco["event_id"].call_args_list]
 
-    def test_builds_a_route_map_from_the_configured_event(self, pco, tmp_path):
-        run_report(FULL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        assert pco["routes"].call_args[0][0] == "Rutas"
-
-    def test_renders_route_column_and_summary(self, pco, tmp_path):
-        run_report(FULL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        _, kwargs = pco["simple"].call_args
+    def test_renders_route_column_and_summary(self, pco):
+        _dry(FULL_SPEC, pco)
+        kwargs = pco["roster"].call_args.kwargs
         assert kwargs["show_route"] is True
-        assert kwargs["sunday_data"] is not None
+        assert kwargs["attendance_summary"] is True
 
-    def test_uses_the_spec_subtitle(self, pco, tmp_path):
-        run_report(FULL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        assert pco["simple"].call_args[0][1] == '"B" Escuela Dominical'
+    def test_writes_instructions_next_to_each_roster_built_once(self, pco):
+        _dry(FULL_SPEC, pco)
+        names = sorted(p.rsplit("/", 1)[1] for p in pco["copies"])
+        assert names == ["Instrucciones.pdf", "Roster.pdf", "Voluntarios.pdf"]
+        pco["instructions"].assert_called_once()
+
+    def test_volunteer_report_lands_in_its_own_folder(self, pco):
+        _dry(FULL_SPEC, pco)
+        vol = next(p for p in pco["copies"] if p.endswith("Voluntarios.pdf"))
+        assert "/Voluntarios/B_Escuela_Dominical/" in vol
+
+    def test_location_filter_skips_the_volunteer_report(self, pco):
+        _dry(FULL_SPEC, pco, location_filter="Primaria")
+        pco["volunteers"].assert_not_called()
+
+    def test_volunteer_event_is_fetched_when_configured(self, pco):
+        spec = ReportSpec(id="rutas", label="Rutas", pco_event="Rutas", volunteer_report=True,
+                          volunteer_event="Junta de Rutas Attendance")
+        _dry(spec, pco)
+        assert "Junta de Rutas Attendance" in [c.args[0] for c in pco["event_id"].call_args_list]
 
 
-class TestOutputs:
-    def test_address_output_generates_the_direcciones_pdf(self, pco, tmp_path):
-        spec = ReportSpec(id="r", label="R", pco_event="R", outputs=("address", "simple"))
-        run_report(spec, dry_run=True, output_dir=str(tmp_path))
-        assert pco["address"].call_args[0][2] == "Direcciones-Roster.pdf"
-        assert pco["simple"].call_args[0][3] == "Roster.pdf"
+class TestSharedRunContext:
+    def test_each_period_is_fetched_once_across_reports(self, pco):
+        """Both Sunday schools read the Rutas event — it must be fetched once."""
+        ctx = RunContext(dry_run=True, output_dir=pco["out"])
+        try:
+            run_report(FULL_SPEC, ctx=ctx)
+            run_report(FULL_SPEC, ctx=ctx)
+        finally:
+            ctx.close()
+        fetched = [(c.args[0], tuple(c.args[1])) for c in pco["checkins"].call_args_list]
+        assert len(fetched) == len(set(fetched))
+
+    def test_run_all_keeps_going_after_a_failure(self, pco, monkeypatch):
+        specs = (ReportSpec(id="a", label="A", pco_event="A"), ReportSpec(id="b", label="B", pco_event="B"))
+        monkeypatch.setattr("planning_center_reports.services.enabled_reports", lambda: specs)
+        pco["roster"].side_effect = [RuntimeError("boom"), "/tmp/x.pdf"]
+        assert run_all(dry_run=True, output_dir=pco["out"]) is False
+        assert pco["roster"].call_count == 2
 
 
-# ── Drive destination ─────────────────────────────────────────────────────────
+# ── Drive layout ──────────────────────────────────────────────────────────────
 
-class TestDriveFolderPrefix:
+class TestDriveFolders:
+    @patch("planning_center_reports.services.upload_if_changed", return_value=True)
     @patch("planning_center_reports.services.upload_and_replace")
-    @patch("planning_center_reports.services.get_or_create_folder")
+    @patch("planning_center_reports.services.get_or_create_folder", side_effect=lambda s, p, n: f"{p}/{n}")
     @patch("planning_center_reports.services.get_drive_service")
-    def test_prefix_nests_the_location_folder(self, _svc, mock_folder, _upload, pco):
-        mock_folder.side_effect = ["prefix-folder-id", "location-folder-id"]
+    def test_prefix_nests_the_location_folder(self, _svc, _folder, upload, upload_if, pco):
         run_report(FULL_SPEC)
-        # First call creates the report's prefix folder under the configured parent,
-        # second creates the class folder inside it.
-        assert mock_folder.call_args_list[0][0][2] == '"B" Escuela Dominical'
-        assert mock_folder.call_args_list[1][0][1] == "prefix-folder-id"
-        assert mock_folder.call_args_list[1][0][2] == "Clase Primaria"
+        roster_folder = upload.call_args_list[0].args[1]
+        assert roster_folder.endswith('/"B" Escuela Dominical/Clase Primaria')
+        vol_folder = upload.call_args_list[-1].args[1]
+        assert vol_folder.endswith('/Voluntarios/"B" Escuela Dominical')
+        assert upload_if.call_args.args[3] == "Instrucciones.pdf"
 
     @patch("planning_center_reports.services.upload_and_replace")
-    @patch("planning_center_reports.services.get_or_create_folder")
+    @patch("planning_center_reports.services.get_or_create_folder", side_effect=lambda s, p, n: f"{p}/{n}")
     @patch("planning_center_reports.services.get_drive_service")
-    def test_no_prefix_keeps_the_original_flat_layout(self, _svc, mock_folder, _upload, pco):
-        mock_folder.return_value = "location-folder-id"
+    def test_no_prefix_keeps_the_flat_layout(self, _svc, _folder, upload, pco):
         run_report(MINIMAL_SPEC)
-        assert mock_folder.call_count == 1
-        assert mock_folder.call_args[0][2] == "Clase Primaria"
+        assert upload.call_args.args[1].endswith("/Clase Primaria")
+        assert upload.call_args.args[1].count("/") == 1
 
-    def test_dry_run_mirrors_the_prefix_on_disk(self, pco, tmp_path):
-        run_report(FULL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        assert pco["copies"]
-        assert "B_Escuela_Dominical" in pco["copies"][0]
-
-    def test_dry_run_without_a_prefix_stays_flat(self, pco, tmp_path):
-        run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        assert pco["copies"] == [str(tmp_path / "Clase_Primaria_Roster.pdf")]
+    def test_dry_run_mirrors_the_prefix_on_disk(self, pco):
+        _dry(FULL_SPEC, pco)
+        assert any("/B_Escuela_Dominical/Clase_Primaria/Roster.pdf" in p for p in pco["copies"])
 
 
-# ── Graceful degradation ──────────────────────────────────────────────────────
+# ── Missing or empty events ───────────────────────────────────────────────────
 
 class TestMissingOrEmptyEvent:
-    def test_missing_event_is_not_a_crash(self, pco, tmp_path, capsys):
-        """A report can be configured before its PCO event exists — e.g. a class
-        that has not started meeting yet."""
-        pco["event_id"].side_effect = Exception("Event not found")
-        run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        out = capsys.readouterr().out
-        assert "exists in Planning Center yet" in out
-        assert "this is not an error" in out
-        pco["simple"].assert_not_called()
+    def test_missing_event_is_not_a_crash(self, pco, capsys):
+        pco["event_id"].side_effect = Exception("Event 'Clases de Niños' not found")
+        _dry(MINIMAL_SPEC, pco)
+        assert "Nothing to generate" in capsys.readouterr().out
+        pco["roster"].assert_not_called()
 
-    def test_event_with_no_checkins_generates_nothing(self, pco, tmp_path, capsys):
-        with patch("planning_center_reports.services.get_checkins_for_event_periods",
-                   return_value=([], [])):
-            run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        out = capsys.readouterr().out
-        assert "No one has checked into" in out
-        assert "this is not an error" in out
-        pco["simple"].assert_not_called()
+    def test_event_with_no_checkins_generates_nothing(self, pco, capsys):
+        pco["checkins"].side_effect = lambda *_a: ([], [])
+        _dry(MINIMAL_SPEC, pco)
+        assert "Nothing to generate" in capsys.readouterr().out
 
-    def test_event_with_no_periods_generates_nothing(self, pco, tmp_path, capsys):
-        with patch("planning_center_reports.services.get_recent_event_periods",
-                   return_value=([], {}, {})):
-            run_report(MINIMAL_SPEC, dry_run=True, output_dir=str(tmp_path))
-        out = capsys.readouterr().out
-        assert "no event periods" in out
-        assert "this is not an error" in out
-        pco["simple"].assert_not_called()
+    def test_event_with_no_periods_generates_nothing(self, pco, capsys):
+        pco["periods"].return_value = []
+        _dry(MINIMAL_SPEC, pco)
+        assert "Nothing to generate" in capsys.readouterr().out
 
-    @pytest.mark.parametrize("failure_mode", ["missing_event", "no_periods", "no_checkins"])
-    def test_empty_runs_exit_zero_through_the_cli(self, pco, tmp_path, monkeypatch, failure_mode):
-        """The Cloud Run job must report success, not failure, when a configured
-        report simply has nothing to generate yet."""
-        import sys
-        from planning_center_reports.cli import main
-
-        if failure_mode == "missing_event":
-            pco["event_id"].side_effect = Exception("404 Not Found")
-            ctx = patch("planning_center_reports.services.get_event_id",
-                        side_effect=Exception("404 Not Found"))
-        elif failure_mode == "no_periods":
-            ctx = patch("planning_center_reports.services.get_recent_event_periods",
-                        return_value=([], {}, {}))
-        else:
-            ctx = patch("planning_center_reports.services.get_checkins_for_event_periods",
-                        return_value=([], []))
-
-        monkeypatch.setattr(sys, "argv",
-                            ["main.py", "escuela-b", "--dry-run", "--output-dir", str(tmp_path)])
-        with ctx:
-            main()   # must not raise SystemExit — argparse/CLI errors would
+    def test_guardian_lookup_failure_still_writes_rosters(self, pco, capsys):
+        pco["guardians"].side_effect = Exception("People API down")
+        _dry(MINIMAL_SPEC, pco)
+        assert "Could not look up parents" in capsys.readouterr().out
+        pco["roster"].assert_called_once()

@@ -113,7 +113,7 @@ def resolve_event_time_id(event_id: str, event_period_id: str, time_str: str) ->
     try:
         hour, minute = (int(p) for p in time_str.split(":"))
     except ValueError:
-        raise Exception(f"--time must be HH:MM (24-hour), got '{time_str}'")
+        raise Exception(f"--time must be HH:MM (24-hour), got '{time_str}'") from None
 
     times = get_event_times(event_id, event_period_id)
     for et in times:

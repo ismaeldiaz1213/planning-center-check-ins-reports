@@ -5,3 +5,5 @@ google-api-python-client
 python-dotenv
 pillow
 pyyaml
+pypdf
+tzdata

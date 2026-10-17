@@ -23,3 +23,13 @@ def clear_google_client_id(monkeypatch):
     This prevents load_dotenv (called when planning_center_reports is imported) from
     leaking the real GOOGLE_CLIENT_ID from .env into the test environment."""
     monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def reset_pco_pacing():
+    """Each test starts with an empty rate window, so hundreds of mocked requests
+    across the suite never trip the real 20-second throttle."""
+    from planning_center_reports import pco_client
+    pco_client._request_times.clear()
+    pco_client._person_cache.clear()
+    yield

@@ -10,12 +10,11 @@ import pytest
 import requests
 
 from planning_center_reports.pco_client import (
-    _fetch_checkins_page,
-    get_checkins_for_event_periods,
     _MAX_PAGES_PER_PERIOD,
     PaginationCircuitBreakerError,
+    _fetch_checkins_page,
+    get_checkins_for_event_periods,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -186,7 +185,7 @@ class TestGetCheckinsForEventPeriods:
 
     @patch("planning_center_reports.pco_client.requests.get")
     def test_uses_correct_query_params(self, mock_get):
-        """First page should sideload locations+person and use per_page=100."""
+        """First page should sideload locations and person, 100 per page."""
         mock_get.return_value = _make_response([])
         get_checkins_for_event_periods("event123", ["ep1"])
         _, kwargs = mock_get.call_args

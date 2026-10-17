@@ -13,13 +13,12 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
-import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -115,7 +114,7 @@ def _get_allowed_domains() -> set[str]:
     return {d.strip().lower() for d in raw.split(",") if d.strip()}
 
 
-def _verify_google_token(authorization: Optional[str] = Header(default=None)) -> dict:
+def _verify_google_token(authorization: str | None = Header(default=None)) -> dict:
     if DEMO_MODE:
         return {"email": "demo@example.com", "name": "Demo User"}
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
@@ -129,7 +128,7 @@ def _verify_google_token(authorization: Optional[str] = Header(default=None)) ->
             token, _google_requests.Request(), client_id
         )
     except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid token") from None
     email = idinfo.get("email", "")
     domain = email.split("@")[-1].lower() if "@" in email else ""
     allowed = _get_allowed_domains()
@@ -162,26 +161,26 @@ def serve_logo():
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 class GenerateRequest(BaseModel):
-    theme: Optional[str] = None
-    type: Optional[str] = None
+    theme: str | None = None
+    type: str | None = None
 
 
 class RunJobRequest(BaseModel):
-    weeks: Optional[int] = Field(default=None, ge=1, le=52)
-    theme: Optional[str] = None
+    weeks: int | None = Field(default=None, ge=1, le=52)
+    theme: str | None = None
 
 
 class ReportSettingsWrite(BaseModel):
-    weeks: Optional[int] = Field(default=None, ge=1, le=52)
-    theme: Optional[str] = None
+    weeks: int | None = Field(default=None, ge=1, le=52)
+    theme: str | None = None
 
 
 class SettingsWrite(BaseModel):
-    pco_app_id: Optional[str] = None
-    pco_secret: Optional[str] = None
-    google_drive_parent_folder_id: Optional[str] = None
+    pco_app_id: str | None = None
+    pco_secret: str | None = None
+    google_drive_parent_folder_id: str | None = None
     # Per-report overrides keyed by report id, e.g. {"escuela-b": {"weeks": 6}}.
-    reports: Optional[dict[str, ReportSettingsWrite]] = None
+    reports: dict[str, ReportSettingsWrite] | None = None
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -193,7 +192,7 @@ def _create_job(job_type: str) -> str:
             "type": job_type,
             "status": "running",
             "output": [],
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
             "finished_at": None,
         }
     return job_id
@@ -225,7 +224,7 @@ def _run_subprocess(job_id: str, cmd: list[str]):
 
         with _jobs_lock:
             _jobs[job_id]["status"] = status
-            _jobs[job_id]["finished_at"] = datetime.now(timezone.utc).isoformat()
+            _jobs[job_id]["finished_at"] = datetime.now(UTC).isoformat()
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -312,7 +311,7 @@ def list_reports(_: dict = Depends(_verify_google_token)):
     try:
         return {"reports": [spec.public_dict() for spec in enabled_reports()]}
     except ReportConfigError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/settings")
@@ -357,7 +356,7 @@ def update_settings(body: SettingsWrite, _: dict = Depends(_verify_google_token)
         try:
             spec = get_report(report_id)
         except ReportConfigError:
-            raise HTTPException(status_code=404, detail=f"Unknown report '{report_id}'")
+            raise HTTPException(status_code=404, detail=f"Unknown report '{report_id}'") from None
         if values.weeks is not None:
             updates[f"{spec.env_prefix}_DEFAULT_WEEKS"] = str(values.weeks)
         if values.theme is not None:
@@ -393,7 +392,7 @@ def run_report_job(
     try:
         spec = get_report(report_id)
     except ReportConfigError:
-        raise HTTPException(status_code=404, detail=f"Unknown report '{report_id}'")
+        raise HTTPException(status_code=404, detail=f"Unknown report '{report_id}'") from None
     if not spec.enabled:
         raise HTTPException(status_code=404, detail=f"Report '{spec.id}' is disabled")
 

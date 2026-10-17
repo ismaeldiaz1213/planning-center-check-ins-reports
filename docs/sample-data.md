@@ -14,7 +14,7 @@ python preview.py
 ```
 
 Output goes to `backend/previews/`. Files are named by type and theme,
-e.g. `previews/primavera_direcciones.pdf`.
+e.g. `previews/primavera_Escuela-Roster.pdf`.
 
 ---
 
@@ -23,8 +23,8 @@ e.g. `previews/primavera_direcciones.pdf`.
 | Flag | Values | Description |
 |------|--------|-------------|
 | `--theme` | `default`, `primavera`, `verano`, `otono`, `invierno` | Apply a campaign colour scheme (default: all themes) |
-| `--type` | `roster`, `escuela`, `direcciones`, `both`, `all` | Generate only one PDF type (default: `all`) |
-| `--report` | any report id or PCO event name from `reports.yaml` | Generate exactly what that report emits — its `outputs`, subtitle, route column, and attendance summary. Overrides `--type`. |
+| `--type` | `roster`, `escuela`, `voluntarios`, `instrucciones`, `all` | Generate only one PDF type (default: `all`) |
+| `--report` | any report id or PCO event name from `reports.yaml` | Generate exactly what that report emits — its roster (subtitle, route column, per-route table) and, if enabled, its volunteer report. Overrides `--type`. |
 | `--open` | — | Open the generated PDFs in your system PDF viewer after generating |
 
 ### Examples
@@ -36,8 +36,8 @@ python preview.py
 # One theme, all types
 python preview.py --theme primavera
 
-# Only address PDFs (Direcciones) with autumn theme
-python preview.py --type direcciones --theme otono
+# Only the volunteer attendance sheet with autumn theme
+python preview.py --type voluntarios --theme otono
 
 # Sunday school rosters only, open immediately
 python preview.py --type escuela --open

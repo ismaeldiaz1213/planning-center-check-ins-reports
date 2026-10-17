@@ -1,8 +1,8 @@
 # planning_center_reports/reports.py
 #
 # Declarative report definitions. A "report" is one PCO Check-Ins event plus the
-# set of optional features its rosters need — bus-route lookup, helper detection,
-# attendance summary tables, which PDFs to produce, where to upload them.
+# set of optional features its rosters need — bus-route lookup, attendance
+# summaries, the volunteer arrival report, instructions, where to upload them.
 #
 # Definitions live in reports.yaml (project root, or backend/, or $REPORTS_CONFIG).
 # If no file is found, DEFAULT_REPORTS is used, which reproduces the original
@@ -10,7 +10,7 @@
 # never adds a reports.yaml keeps working unchanged.
 #
 # Every optional feature defaults to OFF. A church with no bus ministry writes a
-# spec with no route_source_event and no helpers_event, and the pipeline never
+# spec with no route_source_event and no volunteer_event, and the pipeline never
 # contacts those events at all. See docs/reports.md.
 #
 # ReportSpec is a plain frozen dataclass rather than a pydantic model on purpose:
@@ -21,20 +21,22 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, fields
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
 from planning_center_reports.config import RUTAS_SUBTITLE
 
 # Output kinds a report can request.
-#   "simple"  → Roster.pdf              — alphabetical list
-#   "address" → Direcciones-Roster.pdf  — grouped by apartment complex
+#   "simple"  → Roster.pdf  — the class/route roster
 OUTPUT_FILENAMES: dict[str, str] = {
     "simple":  "Roster.pdf",
-    "address": "Direcciones-Roster.pdf",
 }
+VOLUNTEERS_FILENAME   = "Voluntarios.pdf"
+VOLUNTEERS_FOLDER     = "Voluntarios"
+INSTRUCTIONS_FILENAME = "Instrucciones.pdf"
+
 
 # Theme keys accepted in default_theme — mirrors config.THEMES minus the None key.
 VALID_THEMES = {"primavera", "verano", "otono", "invierno"}
@@ -48,8 +50,8 @@ class ReportConfigError(Exception):
 class ReportSpec:
     """One configured report.
 
-    Field defaults define the minimal report: a single alphabetical roster PDF
-    per location, with no route column, helper detection, or summary tables.
+    Field defaults define the minimal report: a single roster PDF per location
+    covering a rolling 26 weeks, with no route column or volunteer report.
     """
 
     # ── Identity ──────────────────────────────────────────────────────────────
@@ -58,28 +60,49 @@ class ReportSpec:
     pco_event: str                     # exact PCO Check-Ins event name
 
     # ── Presentation ──────────────────────────────────────────────────────────
-    subtitle: Optional[str] = None     # PDF header subtitle; defaults to label
+    subtitle: str | None = None     # PDF header subtitle; defaults to label
     icon:     str = "📋"               # emoji for the frontend tile
     enabled:  bool = True              # hide from the UI/CLI without deleting
 
     # ── Outputs ───────────────────────────────────────────────────────────────
     outputs: tuple[str, ...] = ("simple",)
 
+    # ── History ───────────────────────────────────────────────────────────────
+    # Two ways to bound the history a roster looks at:
+    #   start_date    — fixed first Sunday (back-to-school). Anyone seen since then
+    #                   is on the roster; "date added" is their first check-in in
+    #                   the class after it. Classes reset every school year.
+    #   history_weeks — rolling window used when start_date is unset (e.g. a
+    #                   quarter, 13, for bus routes that run all year with adults).
+    start_date:        date | None = None
+    history_weeks:     int = 26
+    max_history_weeks: int = 52        # safety cap on how many Sundays are fetched
+
     # ── Optional features (all off by default) ────────────────────────────────
     # None ⇒ the corresponding PCO event is never fetched.
-    helpers_event:      Optional[str] = None
-    helper_min_age:     int = 16
-    route_source_event: Optional[str] = None
+    route_source_event: str | None = None
     show_route:         bool = False   # render the "Ruta" column
-    attendance_summary: bool = False   # per-Sunday + per-route tables under the roster
+    attendance_summary: bool = False   # per-route breakdown under the roster
+    instructions:       bool = False   # Instrucciones.pdf in every location folder
+
+    # Volunteer attendance (Voluntarios.pdf). Volunteers are the check-ins
+    # Planning Center tags as kind "Volunteer" in this report's own event — or,
+    # when volunteer_event is set, everyone volunteer_min_age+ who checked into
+    # that event (e.g. the bus workers' "Junta de Rutas" meeting).
+    volunteer_report:  bool = False
+    volunteer_event:   str | None = None
+    volunteer_min_age: int = 16
+    volunteer_weeks:   int = 4
 
     # ── Destination ───────────────────────────────────────────────────────────
     # None ⇒ location folders sit directly under GOOGLE_DRIVE_PARENT_FOLDER_ID.
-    drive_folder_prefix: Optional[str] = None
+    drive_folder_prefix: str | None = None
 
     # ── Run defaults ──────────────────────────────────────────────────────────
-    default_weeks: int = 5
-    default_theme: Optional[str] = None
+    # The "active" window: people seen in the last default_weeks Sundays are on
+    # the roster; everyone else since start_date moves to "Hace tiempo".
+    default_weeks: int = 6
+    default_theme: str | None = None
 
     # ── Demo mode ─────────────────────────────────────────────────────────────
     # Location names demo_run.py invents when DEMO_MODE=true.
@@ -96,7 +119,7 @@ class ReportSpec:
             outputs = (outputs,)
         outputs = tuple(outputs)
         if not outputs:
-            raise ValueError("outputs must list at least one of 'simple', 'address'")
+            raise ValueError("outputs must list at least one of 'simple'")
         unknown = [o for o in outputs if o not in OUTPUT_FILENAMES]
         if unknown:
             raise ValueError(
@@ -112,8 +135,27 @@ class ReportSpec:
 
         if not (1 <= int(self.default_weeks) <= 52):
             raise ValueError(f"default_weeks must be between 1 and 52, got {self.default_weeks}")
-        if not (0 <= int(self.helper_min_age) <= 120):
-            raise ValueError(f"helper_min_age must be between 0 and 120, got {self.helper_min_age}")
+        if not (1 <= int(self.history_weeks) <= 104):
+            raise ValueError(f"history_weeks must be between 1 and 104, got {self.history_weeks}")
+        if not (1 <= int(self.max_history_weeks) <= 104):
+            raise ValueError(
+                f"max_history_weeks must be between 1 and 104, got {self.max_history_weeks}"
+            )
+        if not (1 <= int(self.volunteer_weeks) <= 12):
+            raise ValueError(f"volunteer_weeks must be between 1 and 12, got {self.volunteer_weeks}")
+        if not (0 <= int(self.volunteer_min_age) <= 120):
+            raise ValueError(
+                f"volunteer_min_age must be between 0 and 120, got {self.volunteer_min_age}"
+            )
+
+        # YAML gives a date for 2026-08-23 but a string for "2026-08-23".
+        start = self.start_date
+        if isinstance(start, str):
+            try:
+                start = date.fromisoformat(start.strip())
+            except ValueError as exc:
+                raise ValueError(f"start_date must be YYYY-MM-DD, got {self.start_date!r}") from exc
+        object.__setattr__(self, "start_date", start)
 
         # show_route without a source would silently render an always-blank column.
         if self.show_route and not self.route_source_event:
@@ -144,7 +186,14 @@ class ReportSpec:
             return int(raw)
         return self.default_weeks
 
-    def resolved_theme(self) -> Optional[str]:
+    def history_start(self, today: date | None = None) -> date:
+        """First local date whose Sunday is fetched."""
+        if self.start_date:
+            return self.start_date
+        # One day short of history_weeks, so exactly history_weeks Sundays fit.
+        return (today or date.today()) - timedelta(weeks=self.history_weeks, days=-1)
+
+    def resolved_theme(self) -> str | None:
         """default_theme, unless <PREFIX>_DEFAULT_THEME overrides it in the environment."""
         raw = os.environ.get(f"{self.env_prefix}_DEFAULT_THEME", "").strip()
         if raw in VALID_THEMES:
@@ -174,8 +223,7 @@ DEFAULT_REPORTS: tuple[ReportSpec, ...] = (
         pco_event="Rutas",
         icon="🚌",
         subtitle=RUTAS_SUBTITLE,       # "Ministerio de Autobuses" unless overridden in .env
-        outputs=("address", "simple"),
-        helpers_event="Junta de Rutas Attendance",
+        outputs=("simple",),
         demo_locations=("Ruta 1 - Bus", "Ruta 2 - Van", "Ruta 3 - Carro"),
     ),
     ReportSpec(
@@ -184,7 +232,6 @@ DEFAULT_REPORTS: tuple[ReportSpec, ...] = (
         pco_event="Escuela Dominical",
         icon="📚",
         outputs=("simple",),
-        helpers_event="Junta de Rutas Attendance",
         route_source_event="Rutas",
         show_route=True,
         attendance_summary=True,
@@ -200,10 +247,10 @@ _PACKAGE_DIR = Path(__file__).resolve().parent
 _BACKEND_DIR = _PACKAGE_DIR.parent
 _PROJECT_DIR = _BACKEND_DIR.parent
 
-_cache: Optional[tuple[ReportSpec, ...]] = None
+_cache: tuple[ReportSpec, ...] | None = None
 
 
-def config_path() -> Optional[Path]:
+def config_path() -> Path | None:
     """Return the reports config file that will be used, or None if there is none."""
     override = os.environ.get("REPORTS_CONFIG", "").strip()
     if override:

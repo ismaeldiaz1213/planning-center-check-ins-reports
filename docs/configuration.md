@@ -84,17 +84,22 @@ runs without authentication (any request is accepted — local development only)
 | `PCO_SESSION_COOKIE` | *(none)* | Only needed for `backend/promote_checkins.py` (grade promotion) — see [docs/grade-promotion.md](grade-promotion.md) |
 | `PCO_CSRF_TOKEN` | *(none)* | Same as above |
 | `REPORTS_CONFIG` | *(unset — `reports.yaml` at the project root)* | Explicit path to the report definitions file. See [docs/reports.md](reports.md). |
+| `CHURCH_TIMEZONE` | `America/Chicago` | Local time zone for Sunday dates and volunteer check-in times. |
+| `CHECKIN_VIDEO_URL` | IBL's check-in video | Video linked (and QR-coded) on the `Instrucciones.pdf` cover. |
+| `FEEDBACK_FORM_URL` | IBL's feedback form | Form linked from every page and QR-coded at the end of each PDF. |
+| `CHECKIN_HELP_CONTACT` | `Hna. Lira — cuarto de impresoras` | Who to ask for help, printed on the instructions cover. |
 
 ### Per-report run defaults
 
-Each report in `reports.yaml` can have its default week count and campaign theme overridden by
-environment variables derived from its `id` (uppercased, hyphens → underscores):
+Each report in `reports.yaml` can have its active window (Sundays before someone moves to
+*Hace tiempo*) and campaign theme overridden by environment variables derived from its `id`
+(uppercased, hyphens → underscores):
 
 ```
-RUTAS_DEFAULT_WEEKS=5
+RUTAS_DEFAULT_WEEKS=6
 RUTAS_DEFAULT_THEME=
-ESCUELA_DEFAULT_WEEKS=5
-ESCUELA_B_DEFAULT_WEEKS=5
+ESCUELA_DEFAULT_WEEKS=6
+ESCUELA_B_DEFAULT_WEEKS=6
 ```
 
 These are what the web UI's Settings panel writes. See

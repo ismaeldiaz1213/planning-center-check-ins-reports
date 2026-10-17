@@ -12,7 +12,7 @@
 
 import re
 from datetime import date, datetime
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from planning_center_reports.config import MESES_ES
 
@@ -20,7 +20,7 @@ from planning_center_reports.config import MESES_ES
 class Attendee(TypedDict, total=False):
     """Every field that may appear on an attendee record."""
 
-    person_id:  Optional[str]
+    person_id:  str | None
     first_name: str
     last_name:  str
     phone:      str
@@ -36,7 +36,7 @@ class Attendee(TypedDict, total=False):
 
 # ── Date / display helpers ────────────────────────────────────────────────────
 
-def _fecha_es(dt: Optional[datetime] = None) -> str:
+def _fecha_es(dt: datetime | None = None) -> str:
     """Return a Spanish-language date string for the PDF header.
 
     Example: "Generado el 15 de marzo de 2026 a las 10:32"
@@ -61,7 +61,7 @@ def _fmt_birthday(raw: str) -> str:
 
 # ── Age / grade helpers ───────────────────────────────────────────────────────
 
-def _age_from_birthday(birthday_raw: str) -> Optional[int]:
+def _age_from_birthday(birthday_raw: str) -> int | None:
     """Calculate current age in years from a "YYYY-MM-DD" string.
 
     Returns None if the string is missing or unparseable.

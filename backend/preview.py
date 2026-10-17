@@ -2,14 +2,16 @@
 # preview.py
 #
 # Generate sample PDFs locally for layout and theme testing.
-# No Planning Center or Google Drive credentials needed — the package imports
-# only what it needs, so pco_client and drive_client are never loaded here.
+# No Planning Center or Google Drive credentials needed — everything is drawn
+# from planning_center_reports/mock_data.py.
 #
 # Usage:
-#   python preview.py                    # all themes, both PDF types
+#   python preview.py                    # all themes, every PDF type
 #   python preview.py --theme primavera  # one specific theme
-#   python preview.py --type roster      # only the simple roster PDF
-#   python preview.py --type direcciones # only the address-grouped PDF
+#   python preview.py --type roster      # Roster.pdf (bus route layout)
+#   python preview.py --type escuela     # Roster.pdf with the Ruta column
+#   python preview.py --type voluntarios # Voluntarios.pdf
+#   python preview.py --type instrucciones  # Instrucciones.pdf (theme-independent)
 #   python preview.py --report escuela-b # exactly what one configured report emits
 #   python preview.py --open             # open PDFs in your viewer after generating
 #
@@ -21,9 +23,11 @@ import subprocess
 
 import planning_center_reports.config as config
 from planning_center_reports.config import RUTAS_SUBTITLE
-from planning_center_reports.mock_data import MOCK_ATTENDEES, MOCK_SUNDAY_DATA
-from planning_center_reports.pdf.rosters import generate_address_pdf, generate_simple_roster_pdf
-from planning_center_reports.reports import OUTPUT_FILENAMES, ReportConfigError, get_report
+from planning_center_reports.mock_data import mock_roster, mock_volunteers
+from planning_center_reports.pdf.instructions import build_instructions_pdf
+from planning_center_reports.pdf.rosters import generate_roster_pdf
+from planning_center_reports.pdf.volunteers import generate_volunteer_pdf
+from planning_center_reports.reports import ReportConfigError, get_report
 
 THEMES_AVAILABLE = [None, "primavera", "verano", "otono", "invierno"]
 THEME_LABELS = {
@@ -45,11 +49,9 @@ def main():
     )
     parser.add_argument(
         "--type",
-        choices=["roster", "escuela", "direcciones", "both", "all"],
+        choices=["roster", "escuela", "voluntarios", "instrucciones", "all"],
         default="all",
-        help="Which PDF type to generate (default: all). "
-             "'roster'=Rutas alphabetical, 'escuela'=Escuela Dominical with route column, "
-             "'direcciones'=address-grouped, 'both'=roster+direcciones, 'all'=all three",
+        help="Which PDF to generate (default: all)",
     )
     parser.add_argument(
         "--report",
@@ -82,53 +84,46 @@ def main():
 
     generated = []
 
+    def emit(path: str) -> None:
+        print(f"  ✓ {os.path.basename(path)}")
+        generated.append(path)
+
     for theme_key in themes_to_run:
         # Set the active theme on the shared config module — all PDF functions
         # pick it up automatically via config.T().
         config._theme = config.THEMES[theme_key]
-        slug  = theme_key or "default"
-        label = THEME_LABELS[theme_key]
-        print(f"\n── {label} ──")
+        slug = theme_key or "default"
+        print(f"\n── {THEME_LABELS[theme_key]} ──")
 
-        if args.report:
-            # Mirror the real pipeline: same outputs, subtitle, and optional
-            # features as the configured report, driven by mock data.
-            for kind in spec.outputs:
-                path = os.path.join(out_dir, f"{slug}_{spec.id}_{OUTPUT_FILENAMES[kind]}")
-                location = spec.demo_locations[0] if spec.demo_locations else spec.label
-                if kind == "address":
-                    generate_address_pdf(location, MOCK_ATTENDEES, path)
-                else:
-                    generate_simple_roster_pdf(
-                        location, spec.pdf_subtitle, MOCK_ATTENDEES, path,
-                        show_route=spec.show_route,
-                        sunday_data=MOCK_SUNDAY_DATA if spec.attendance_summary else None,
-                    )
-                print(f"  ✓ {os.path.basename(path)}")
-                generated.append(path)
+        if spec:
+            # Mirror the real pipeline: same subtitle and optional features as
+            # the configured report, driven by mock data.
+            location = spec.demo_locations[0] if spec.demo_locations else spec.label
+            path = os.path.join(out_dir, f"{slug}_{spec.id}_Roster.pdf")
+            generate_roster_pdf(mock_roster(location, spec.show_route), spec.pdf_subtitle, path,
+                                show_route=spec.show_route, attendance_summary=spec.attendance_summary)
+            emit(path)
+            if spec.volunteer_report:
+                path = os.path.join(out_dir, f"{slug}_{spec.id}_Voluntarios.pdf")
+                emit(generate_volunteer_pdf(mock_volunteers(), spec.label, path))
             continue
 
-        if args.type in ("roster", "both", "all"):
+        if args.type in ("roster", "all"):
             path = os.path.join(out_dir, f"{slug}_Roster.pdf")
-            generate_simple_roster_pdf("Ruta 1 - Bus", RUTAS_SUBTITLE, MOCK_ATTENDEES, path)
-            print(f"  ✓ {os.path.basename(path)}")
-            generated.append(path)
+            emit(generate_roster_pdf(mock_roster("Ruta 1 - Bus", show_route=False), RUTAS_SUBTITLE, path))
 
         if args.type in ("escuela", "all"):
-            # Escuela Dominical: helpers stay on roster (route already blank on their records)
             path = os.path.join(out_dir, f"{slug}_Escuela-Roster.pdf")
-            generate_simple_roster_pdf(
-                "Clase Primaria", "Escuela Dominical", MOCK_ATTENDEES, path,
-                show_route=True, sunday_data=MOCK_SUNDAY_DATA,
-            )
-            print(f"  ✓ {os.path.basename(path)}")
-            generated.append(path)
+            emit(generate_roster_pdf(mock_roster("Clase Primaria"), "Escuela Dominical", path,
+                                     show_route=True, attendance_summary=True))
 
-        if args.type in ("direcciones", "both", "all"):
-            path = os.path.join(out_dir, f"{slug}_Direcciones-Roster.pdf")
-            generate_address_pdf("Ruta 1 - Bus", MOCK_ATTENDEES, path)
-            print(f"  ✓ {os.path.basename(path)}")
-            generated.append(path)
+        if args.type in ("voluntarios", "all"):
+            path = os.path.join(out_dir, f"{slug}_Voluntarios.pdf")
+            emit(generate_volunteer_pdf(mock_volunteers(), "Escuela Dominical", path))
+
+    if args.type in ("instrucciones", "all") and not spec:
+        print("\n── Instrucciones ──")
+        emit(build_instructions_pdf(os.path.join(out_dir, "Instrucciones.pdf")))
 
     print(f"\nAll previews saved to: {out_dir}/")
 
@@ -137,7 +132,7 @@ def main():
         for path in generated:
             try:
                 subprocess.Popen(["xdg-open", path])
-            except Exception:
+            except OSError:
                 print(f"  Could not open {path} — open it manually.")
 
 

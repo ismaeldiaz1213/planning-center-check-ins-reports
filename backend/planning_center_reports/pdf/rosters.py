@@ -1,252 +1,205 @@
 # planning_center_reports/pdf/rosters.py
 #
-# The two roster generators used by both the production run (services.py) and
-# the local preview tool (preview.py).
+# Roster.pdf — one per class or bus route. Layout, top to bottom:
 #
-#   generate_address_pdf        — address-grouped layout (Direcciones-Roster.pdf)
-#   generate_simple_roster_pdf  — alphabetical layout (Roster.pdf)
+#   header           location, report, history range
+#   Lista            everyone seen in the active window, with attendance dots,
+#                    date added, and a parent line under each kid
+#   Maestros         people Planning Center tags as Volunteer
+#   Hace tiempo      seen since the history start but not lately — call list
+#   Resumen          a few numbers, attendance per Sunday, and riders per
+#                    route (reports with attendance_summary)
 #
-# Both functions accept a list of Attendee dicts, write a PDF to `filename`,
-# and return that filename. The active theme is read from config._theme via the
-# imported drawing primitives — callers set the theme in config before calling.
+# The data comes ready-made from roster_data.LocationRoster; this module only
+# chooses rows, cells and colours. Drawing primitives live in layout.py.
 
-from collections import defaultdict
-from datetime import datetime
+from __future__ import annotations
 
-from reportlab.lib.pagesizes import landscape, letter
-from reportlab.pdfgen import canvas as rl_canvas
+from collections import Counter
 
-from planning_center_reports.config import (
-    MIN_EMPTY_ROWS,
-    PAGE_H,
-    MARGIN,
-    HEADER_H,
-    COL_HDR_H,
-    FOOTER_H,
-    ROW_H,
-    ED_COL_WIDTHS,
-    ED_HEADERS,
-    SR_COL_WIDTHS,
-    SR_HEADERS,
-    RUTAS_SUBTITLE,
-)
+from planning_center_reports.config import ACCENT_OK, ACCENT_WARN, MESES_ABREV
 from planning_center_reports.models import (
-    _complex_key,
-    _extract_apt,
-    _extract_route_number,
     _fmt_birthday,
     _is_bad_address,
     _is_minor,
-    _parse_apt_number,
     _resolve_grade,
-    _street_only,
 )
 from planning_center_reports.pdf.layout import (
-    _draw_address_bar,
-    _draw_column_headers,
-    _draw_data_row,
-    _draw_escuela_summary,
-    _draw_page_footer,
-    _draw_page_header,
-    _rows_available,
-    escuela_summary_height,
+    Cell,
+    Column,
+    Page,
+    Row,
+    draw_feedback_card,
+    draw_note,
+    draw_resumen,
+    draw_section,
+    draw_table,
 )
+from planning_center_reports.roster_data import LocationRoster, Member, short_date
 
 
-def generate_address_pdf(location_name: str, attendees: list, filename: str = "Direcciones-Roster.pdf") -> str:
-    """Generate the address-grouped roster PDF used by bus secretaries.
-
-    Attendees are grouped by apartment complex, then sorted by unit number
-    within each group. Each group gets a coloured address bar and at least
-    MIN_EMPTY_ROWS blank write-in rows for walk-in visitors.
-
-    Returns the filename of the written PDF.
-    """
-    visitor_count = sum(1 for p in attendees if p.get("is_visitor"))
-    c      = rl_canvas.Canvas(filename, pagesize=landscape(letter))
-    gen_dt = datetime.now()
-
-    # Group by complex, sort within group by apartment number
-    complex_groups: dict = defaultdict(list)
-    for person in attendees:
-        addr = (person.get("address") or "").strip()
-        complex_groups[_complex_key(addr)].append(person)
-    for key in complex_groups:
-        complex_groups[key].sort(key=lambda p: _parse_apt_number(p.get("address") or ""))
-
-    # Complexes with a key sort first; unknown/empty addresses go last
-    sorted_groups = sorted(
-        complex_groups.items(),
-        key=lambda kv: (0, kv[0]) if kv[0] else (1, ""),
-    )
-
-    page_num    = 1
-    first_group = True
-
-    def new_page(is_first: bool) -> float:
-        if not is_first:
-            c.showPage()
-        return _draw_page_header(c, location_name, RUTAS_SUBTITLE, gen_dt, visitor_count)
-
-    cursor_y  = new_page(is_first=True)
-    rows_left = _rows_available(is_first_page=True)
-
-    for group_key, group_people in sorted_groups:
-        raw_addr = (group_people[0].get("address") or "").strip() if group_people else ""
-        bar_addr = _street_only(raw_addr)
-        # Ensure the whole group (plus empty rows) fits; if not, start a new page
-        needed   = len(group_people) + MIN_EMPTY_ROWS + 1
-        if rows_left < needed and not first_group:
-            _draw_page_footer(c, page_num)
-            page_num += 1
-            cursor_y  = new_page(is_first=False)
-            rows_left = _rows_available(is_first_page=False)
-
-        first_group = False
-        cursor_y    = _draw_address_bar(c, bar_addr, cursor_y)
-        cursor_y    = _draw_column_headers(c, cursor_y)
-        rows_left  -= 1
-        row_index   = 0
-
-        for person in group_people:
-            if rows_left <= 0:
-                _draw_page_footer(c, page_num)
-                page_num  += 1
-                cursor_y   = new_page(is_first=False)
-                cursor_y   = _draw_address_bar(c, bar_addr, cursor_y)
-                cursor_y   = _draw_column_headers(c, cursor_y)
-                rows_left  = _rows_available(is_first_page=False) - 1
-                row_index  = 0
-
-            fn, ln   = person.get("first_name", ""), person.get("last_name", "")
-            addr     = person.get("address", "")
-            bday_raw = person.get("birthday", "")
-            bday     = _fmt_birthday(bday_raw)
-            ph       = person.get("phone", "")
-            grade    = _resolve_grade(person.get("grade", ""), bday_raw)
-            apt      = _extract_apt(addr)
-            addr_d   = _street_only(addr)
-            attend   = person.get("attendance", "")
-            is_v     = person.get("is_visitor", False)
-
-            grade_warn = _is_minor(bday_raw) and not grade
-            warn = [False, not fn, not ln, not bday, not ph,
-                    grade_warn, False, False, _is_bad_address(addr)]
-
-            cursor_y  = _draw_data_row(c, cursor_y,
-                                       ["", fn, ln, bday, ph, grade, apt, attend, addr_d],
-                                       row_index, warn, is_visitor=is_v)
-            rows_left -= 1
-            row_index += 1
-
-        # Guarantee at least MIN_EMPTY_ROWS blank rows for walk-ins
-        if rows_left < MIN_EMPTY_ROWS:
-            _draw_page_footer(c, page_num)
-            page_num  += 1
-            cursor_y   = new_page(is_first=False)
-            cursor_y   = _draw_address_bar(c, bar_addr, cursor_y)
-            cursor_y   = _draw_column_headers(c, cursor_y)
-            rows_left  = _rows_available(is_first_page=False) - 1
-            row_index  = 0
-
-        for _ in range(min(MIN_EMPTY_ROWS, rows_left)):
-            cursor_y  = _draw_data_row(c, cursor_y,
-                                       ["", "", "", "", "", "", "", "", bar_addr],
-                                       row_index, [False] * 9)
-            row_index += 1
-            rows_left -= 1
-
-    _draw_page_footer(c, page_num)
-    c.save()
-    return filename
+def short_route(route: str) -> str:
+    """"Ruta 1 - Bus" → "1 Bus", "Ruta 12" → "12"."""
+    if not route:
+        return ""
+    text = route.strip()
+    if text.lower().startswith("ruta "):
+        text = text[5:]
+    return text.replace(" - ", " ")
 
 
-def generate_simple_roster_pdf(location_name: str, subtitle: str,
-                                attendees: list, filename: str = "Lista.pdf",
-                                show_route: bool = False,
-                                sunday_data: list = None) -> str:
-    """Generate the clean alphabetical roster PDF used by bus drivers and Sunday
-    school teachers.
+def _short_address(address: str) -> str:
+    """Drop the state and ZIP — everyone on a roster lives in the same area."""
+    parts = [p.strip() for p in (address or "").split(",") if p.strip()]
+    while parts and (parts[-1].replace("-", "").isdigit() or len(parts[-1]) == 2):
+        parts.pop()
+    return ", ".join(parts)
 
-    Attendees are sorted by last name then first name. No address grouping,
-    no blank write-in rows. The visitor marker is drawn for people added to PCO
-    within the last 7 days.
 
-    When show_route=True the Asist. column is replaced with Ruta (showing only
-    the route number), using the wider ED layout (Escuela Dominical format).
-    If sunday_data is also provided, a compact attendance summary (per-Sunday
-    counts and route totals) is drawn below the last attendee row.
+def _long_date(d) -> str:
+    return f"{d.day} {MESES_ABREV[d.month].lower()} {d.year}" if d else ""
 
-    Returns the filename of the written PDF.
-    """
-    from collections import Counter
 
-    col_widths = ED_COL_WIDTHS if show_route else SR_COL_WIDTHS
-    headers    = ED_HEADERS    if show_route else SR_HEADERS
+def _same_place(a: str, b: str) -> bool:
+    """Compare addresses ignoring punctuation and unit markers ("#803" == "803")."""
+    def norm(s: str) -> str:
+        s = s.lower().replace("apto", "").replace("apt", "")
+        return "".join(ch for ch in s if ch.isalnum())
+    return norm(a) == norm(b)
 
-    visitor_count = sum(1 for p in attendees if p.get("is_visitor"))
-    c      = rl_canvas.Canvas(filename, pagesize=landscape(letter))
-    gen_dt = datetime.now()
 
-    rows_per_page = int((PAGE_H - 2 * MARGIN - HEADER_H - COL_HDR_H - FOOTER_H) / ROW_H)
+def _guardian_line(m: Member) -> list[tuple[str, str]] | None:
+    g = m.guardian
+    if not g:
+        return None
+    parts = [("Padre/Tutor:", g.get("name", "")), ("", g.get("phone", ""))]
+    addr = _short_address(g.get("address", ""))
+    if addr and not _same_place(addr, _short_address(m.address)):
+        parts.append(("", addr))
+    return parts
 
-    sorted_attendees = sorted(
-        attendees,
-        key=lambda p: (p.get("last_name", "").lower(), p.get("first_name", "").lower()),
-    )
 
-    def new_page(is_first: bool) -> float:
-        if not is_first:
-            c.showPage()
-        return _draw_page_header(c, location_name, subtitle, gen_dt, visitor_count)
+def _main_columns(show_route: bool) -> list[Column]:
+    cols = [
+        Column("", 14),
+        Column("Nombre", 96),
+        Column("Apellido", 100),
+        Column("Cumpleaños", 62),
+        Column("Teléfono", 82),
+        Column("Grado", 42),
+    ]
+    if show_route:
+        cols.append(Column("Ruta", 46))
+    cols += [Column("Asistencia", 50), Column("Agregado", 54)]
+    cols.append(Column("Dirección", 720 - sum(c.width for c in cols)))
+    return cols
 
-    cursor_y  = new_page(is_first=True)
-    cursor_y  = _draw_column_headers(c, cursor_y, col_widths, headers)
-    rows_left = rows_per_page
-    page_num  = 1
-    row_index = 0
 
-    for person in sorted_attendees:
-        if rows_left <= 0:
-            _draw_page_footer(c, page_num)
-            page_num  += 1
-            cursor_y   = new_page(is_first=False)
-            cursor_y   = _draw_column_headers(c, cursor_y, col_widths, headers)
-            rows_left  = rows_per_page
-            row_index  = 0
+def _main_row(roster: LocationRoster, m: Member, show_route: bool) -> Row:
+    bday  = _fmt_birthday(m.birthday)
+    grade = _resolve_grade(m.grade, m.birthday)
+    cells = [
+        Cell(),
+        Cell(m.first_name, warn=not m.first_name, style="bold"),
+        Cell(m.last_name, warn=not m.last_name),
+        Cell(bday, warn=not bday),
+        Cell(m.phone, warn=not m.phone and not m.guardian),
+        Cell(grade, warn=_is_minor(m.birthday) and not grade),
+    ]
+    if show_route:
+        cells.append(Cell(short_route(m.route), style="muted"))
+    cells.append(Cell(style="meter", meter=(m.attended, m.window)))
+    if roster.is_recent(m):
+        cells.append(Cell(short_date(m.date_added), style="chip", color=ACCENT_OK))
+    else:
+        cells.append(Cell(short_date(m.date_added), style="muted"))
+    cells.append(Cell(_short_address(m.address), warn=_is_bad_address(m.address)))
+    return Row(cells=cells, marker=m.is_new, sub=_guardian_line(m))
 
-        fn, ln   = person.get("first_name", ""), person.get("last_name", "")
-        addr     = person.get("address", "")
-        bday_raw = person.get("birthday", "")
-        bday     = _fmt_birthday(bday_raw)
-        ph       = person.get("phone", "")
-        grade    = _resolve_grade(person.get("grade", ""), bday_raw)
-        apt      = _extract_apt(addr)
-        addr_d   = _street_only(addr)
-        col8     = _extract_route_number(person.get("route", "")) if show_route else person.get("attendance", "")
-        is_v     = person.get("is_visitor", False)
 
-        grade_warn = _is_minor(bday_raw) and not grade
-        warn = [False, not fn, not ln, not bday, not ph,
-                grade_warn, False, False, _is_bad_address(addr)]
+def _resumen(page: Page, roster: LocationRoster, show_route: bool, attendance_summary: bool) -> None:
+    """Numbers at the bottom: averages, attendance per Sunday, riders per route."""
+    avg = roster.average_attendance
+    stats = [
+        ("Promedio por domingo", f"{avg:.0f}"),
+        (f"Agregados en {len(roster.sundays)} semanas", str(roster.added_recently)),
+        ("Nuevos este domingo", str(roster.new_this_week)),
+    ]
+    tables = [(
+        [Column("Domingo", 70), Column("Regulares", 62, "center"),
+         Column("Nuevos", 52, "center"), Column("Total", 46, "center")],
+        [Row(cells=[Cell(s.label, style="bold"), Cell(str(s.regular)), Cell(str(s.visitors)),
+                    Cell(str(s.total), style="bold")]) for s in roster.sundays],
+    )]
+    routed = Counter(short_route(m.route) for m in roster.active if m.route)
+    if attendance_summary and show_route and routed:
+        tables.append((
+            [Column("Ruta", 90), Column("Niños en la lista", 90, "center")],
+            [Row(cells=[Cell(f"Ruta {r}", style="bold"), Cell(str(n))])
+             for r, n in sorted(routed.items(), key=lambda kv: (-kv[1], kv[0]))],
+        ))
+    draw_resumen(page, stats, tables)
 
-        cursor_y  = _draw_data_row(c, cursor_y,
-                                   ["", fn, ln, bday, ph, grade, apt, col8, addr_d],
-                                   row_index, warn, is_visitor=is_v,
-                                   col_widths=col_widths)
-        rows_left -= 1
-        row_index += 1
 
-    # Draw summary tables below the roster (Escuela Dominical only)
-    if show_route and sunday_data:
-        n_routes  = len(Counter(p.get("route", "") for p in attendees if p.get("route", "")))
-        needed    = escuela_summary_height(len(sunday_data), n_routes)
-        if cursor_y - MARGIN < needed:
-            _draw_page_footer(c, page_num)
-            page_num += 1
-            cursor_y  = new_page(is_first=False)
-        _draw_escuela_summary(c, cursor_y, attendees, sunday_data)
+def generate_roster_pdf(roster: LocationRoster, subtitle: str, filename: str,
+                        show_route: bool = False, attendance_summary: bool = False) -> str:
+    """Write Roster.pdf for one location and return `filename`."""
+    weeks = len(roster.sundays)
+    meta = [f"Historial desde {_long_date(roster.history_start)} · {roster.history_sundays} domingos"]
+    page = Page(filename, roster.location, subtitle, meta)
 
-    _draw_page_footer(c, page_num)
-    c.save()
+    # ── Lista ──
+    draw_section(page, "Lista", len(roster.active),
+                 note=f"Vinieron en los últimos {weeks} domingos · un punto por domingo · "
+                      "Agregado = primer domingo en esta clase",
+                 keep_with=40)
+    draw_table(page, _main_columns(show_route),
+               [_main_row(roster, m, show_route) for m in roster.active],
+               empty_text="Nadie ha venido en las últimas semanas.")
+
+    # ── Maestros y ayudantes ──
+    if roster.workers:
+        draw_section(page, "Maestros y ayudantes", len(roster.workers),
+                     note="Registrados como voluntarios en Planning Center", keep_with=40)
+        draw_table(page, [
+            Column("", 14), Column("Nombre", 120), Column("Apellido", 130),
+            Column("Teléfono", 100), Column("Asistencia", 70), Column("Última vez", 70),
+        ], [
+            Row(cells=[
+                Cell(), Cell(m.first_name, style="bold"), Cell(m.last_name),
+                Cell(m.phone, warn=not m.phone), Cell(style="meter", meter=(m.attended, m.window)),
+                Cell(short_date(m.last_seen), style="muted"),
+            ]) for m in roster.workers
+        ])
+
+    # ── Hace tiempo que no viene ──
+    if roster.inactive:
+        draw_section(page, "Hace tiempo que no viene", len(roster.inactive), accent=ACCENT_WARN,
+                     note=f"Vinieron desde {_long_date(roster.history_start)} pero no en los últimos "
+                          f"{weeks} domingos · buena lista para llamar",
+                     keep_with=40)
+        cols = [Column("", 14), Column("Nombre", 96), Column("Apellido", 100), Column("Teléfono", 82)]
+        if show_route:
+            cols.append(Column("Ruta", 46))
+        cols += [Column("Última vez", 58), Column("Semanas", 50, "center"), Column("Veces", 42, "center")]
+        cols.append(Column("Dirección", 720 - sum(c.width for c in cols)))
+        rows = []
+        for m in roster.inactive:
+            cells = [Cell(), Cell(m.first_name, style="bold"), Cell(m.last_name),
+                     Cell(m.phone, warn=not m.phone and not m.guardian)]
+            if show_route:
+                cells.append(Cell(short_route(m.route), style="muted"))
+            cells += [
+                Cell(short_date(m.last_seen)),
+                Cell(str(m.weeks_absent)),
+                Cell(str(m.times_total), style="muted"),
+                Cell(_short_address(m.address), warn=_is_bad_address(m.address)),
+            ]
+            rows.append(Row(cells=cells, sub=_guardian_line(m)))
+        draw_table(page, cols, rows, gap_after=0)
+        draw_note(page, "Semanas = domingos desde la última vez · Veces = domingos que vino desde el inicio")
+
+    _resumen(page, roster, show_route, attendance_summary)
+    draw_feedback_card(page)
+    page.save()
     return filename

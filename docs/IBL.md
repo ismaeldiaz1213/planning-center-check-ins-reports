@@ -37,7 +37,7 @@ Drive folder structure (auto-created by the script):
    📁 Rutas/
       📁 Ruta 1 - Bus/
          Roster.pdf
-         Direcciones-Roster.pdf
+         Instrucciones.pdf
       📁 Ruta 2 - Bus/
          ...
    📁 Escuela Dominical/
@@ -90,33 +90,37 @@ GCP_SA_EMAIL=ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccou
 
 ## Schedule
 
-One Cloud Run job and one Cloud Scheduler entry per report, named `roster-<id>` and
-`run-roster-<id>`. `setup_gcloud.sh` creates them from `reports.yaml`.
+One scheduled job, `roster-weekly`, runs every report in `reports.yaml` in a single process
+(`python main.py --all`) so Rutas, Junta and parent lookups are fetched once. Each report also
+has an unscheduled `roster-<id>` job for one-off runs (`./manage.sh` → 8).
 
 | Job | Cron | Local time |
 |-----|------|-----------|
-| `roster-rutas` | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
-| `roster-escuela` | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
-| `roster-escuela-c` | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
+| `roster-weekly` (schedule `run-roster-weekly`) | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
+
+| Report | History | Volunteers |
+|--------|---------|-----------|
+| `rutas` | rolling 13 weeks (a quarter) | Junta de Rutas, everyone 16+ |
+| `escuela` | since 2026-08-23 (back to school) | check-ins tagged *Volunteer* |
+| `escuela-c` | since 2026-09-27 (first C run) | check-ins tagged *Volunteer* |
 
 During summer (CDT, roughly March–November), the 8:00 AM UTC run lands at 3 AM local
 rather than 2 AM. Adjust to `0 7 * * 1` in Cloud Scheduler if running at 2 AM is important.
 
 ---
 
-## Helpers / Junta de Rutas
+## Workers and the Junta de Rutas
 
-Bus workers (helpers) are members 16+ who appear on the Junta de Rutas attendance list.
-They are checked into a Sunday school event but belong to a helper group rather than
-a class. Helper detection is opt-in per report via `helpers_event` in `reports.yaml`;
-all three of IBL's reports use it. In the generated PDFs:
+Staff now tag teachers and bus workers as **Volunteer** when checking them in, so the rosters
+no longer guess who is a worker. Anyone whose latest check-in is tagged *Volunteer* goes in
+the roster's **Maestros y ayudantes** table, has no Ruta, and isn't counted with the kids.
 
-- They appear on the Sunday school roster with their name and attendance rate
-- The **Ruta** column is blank (they are not assigned to a class route)
-- They are **not** counted toward route headcount totals in the attendance summary table
+The Junta de Rutas meeting isn't tagged, so `Voluntarios.pdf` for Rutas uses everyone 16+
+who checked into it, grouped by the route they serve. The sheet lists check-in times as they
+are — meetings don't always start on time, so it doesn't mark anyone early or late.
 
-The helper detection logic lives in `backend/planning_center_reports/pco_client.py`
-(`get_helpers_set`), applied in `services.py` only when a report declares `helpers_event`.
+"C" Escuela Dominical had no *Volunteer* check-ins as of October 2026 — its volunteer report
+shows an empty state explaining how to tag them until staff start doing so.
 
 ---
 

@@ -34,6 +34,10 @@ The script walks through interactively:
 5. Creates one Cloud Run Job per report in `reports.yaml` (`roster-rutas`, `roster-escuela`, `roster-escuela-b`, …)
 6. Creates the Cloud Scheduler jobs (Monday 8:00 AM UTC = 2:00 AM CST)
 
+> After setup, run `./manage.sh` → **10 (Sync)** once. It adds the single `roster-weekly` job
+> (`main.py --all`) with its Monday schedule and offers to remove the per-report schedules,
+> which `roster-weekly` replaces.
+
 After it finishes, run `./manage.sh → option 11` to confirm every report's job has a green status.
 
 ---
@@ -92,12 +96,14 @@ Options 8, 9, 20 and 21 list the reports from `reports.yaml` and let you pick on
 
 Reconciles Cloud Run with `reports.yaml`:
 
-- **Creates** a `roster-<id>` job and a `run-roster-<id>` Monday schedule for any report that
-  doesn't have one yet. This is how a report newly added to `reports.yaml` gets deployed —
-  no full `setup_gcloud.sh` run needed.
+- **Creates** a `roster-<id>` job (unscheduled, for one-off runs) for any report that doesn't
+  have one, and the `roster-weekly` job + `run-roster-weekly` Monday schedule that runs every
+  report in one process. A report newly added to `reports.yaml` is picked up by `roster-weekly`
+  with no further setup.
+- **Offers to delete per-report schedules** (`run-roster-<id>`) left from before
+  `roster-weekly` — otherwise rosters would be generated twice.
 - **Reports orphans** — any `roster-*` job with no matching report — and offers to delete them
-  along with their schedules. This matters after renaming a report id: the old job keeps
-  firing on its own schedule and would generate a duplicate set of rosters every week.
+  along with their schedules. This matters after renaming a report id.
 
 Option 6 (deploy code) also creates missing jobs, but only option 10 finds orphans.
 
@@ -169,13 +175,11 @@ gcloud run jobs update roster-rutas \
 
 | Job | Cron | Default time |
 |-----|------|-------------|
-| `roster-rutas` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
-| `roster-escuela` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
-| `roster-escuela-b` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
+| `roster-weekly` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
 
 To adjust for daylight saving time:
 ```bash
-gcloud scheduler jobs update http roster-rutas-schedule \
+gcloud scheduler jobs update http run-roster-weekly --location=us-central1 \
     --schedule="0 7 * * 1" \
     --project=YOUR_PROJECT
 ```
