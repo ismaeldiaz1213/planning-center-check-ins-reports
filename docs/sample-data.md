@@ -22,8 +22,9 @@ e.g. `previews/primavera_direcciones.pdf`.
 
 | Flag | Values | Description |
 |------|--------|-------------|
-| `--theme` | `primavera`, `verano`, `otono`, `invierno` | Apply a campaign colour scheme |
-| `--type` | `rutas`, `escuela`, `direcciones` | Generate only one PDF type |
+| `--theme` | `default`, `primavera`, `verano`, `otono`, `invierno` | Apply a campaign colour scheme (default: all themes) |
+| `--type` | `roster`, `escuela`, `direcciones`, `both`, `all` | Generate only one PDF type (default: `all`) |
+| `--report` | any report id or PCO event name from `reports.yaml` | Generate exactly what that report emits — its `outputs`, subtitle, route column, and attendance summary. Overrides `--type`. |
 | `--open` | — | Open the generated PDFs in your system PDF viewer after generating |
 
 ### Examples
@@ -42,8 +43,14 @@ python preview.py --type direcciones --theme otono
 python preview.py --type escuela --open
 
 # Quick single-file check
-python preview.py --type rutas --theme invierno --open
+python preview.py --type roster --theme invierno --open
+
+# Exactly what a configured report produces — the fastest way to eyeball a new
+# entry in reports.yaml before running it against live data
+python preview.py --report escuela-b --theme default --open
 ```
+
+See [docs/reports.md](reports.md) for the `reports.yaml` schema.
 
 ---
 

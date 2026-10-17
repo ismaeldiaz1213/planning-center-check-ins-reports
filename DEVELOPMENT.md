@@ -29,6 +29,7 @@ planning-center-check-ins-reports/
 │   │   ├── pco_client.py           ←     Planning Center API calls
 │   │   ├── drive_client.py         ←     Google Drive upload
 │   │   ├── services.py             ←     Fetch → transform → generate → upload
+│   │   ├── reports.py              ←     reports.yaml schema + loader
 │   │   ├── cli.py                  ←     argparse entrypoint
 │   │   └── pdf/
 │   │       ├── layout.py           ←     ReportLab primitives
@@ -41,13 +42,17 @@ planning-center-check-ins-reports/
 │   ├── requirements-web.txt        ←   FastAPI + uvicorn (API server only)
 │   └── requirements-dev.txt        ←   pytest + ruff (dev tools)
 │
+├── reports.yaml                    ← Report definitions (see docs/reports.md)
+├── reports.yaml.example            ←   Template; defaults apply if reports.yaml is absent
+│
 ├── frontend/                       ← React web UI (TypeScript + Vite)
 │   ├── src/
 │   │   ├── App.tsx
 │   │   ├── components/             ←   Navbar, tiles, modals
 │   │   ├── i18n/                   ←   Spanish/English translations + context
 │   │   ├── api/client.ts           ←   fetch wrappers for the backend API
-│   │   └── hooks/useJob.ts         ←   Job polling hook
+│   │   ├── hooks/useJob.ts         ←   Job polling hook
+│   │   └── hooks/useReports.ts     ←   Loads /api/reports for the dashboard tiles
 │   ├── package.json
 │   └── vite.config.ts              ←   Dev proxy → localhost:8000
 │
@@ -125,6 +130,9 @@ python preview.py --theme primavera
 
 # Only Escuela Dominical rosters
 python preview.py --type escuela
+
+# Exactly what one configured report emits (outputs, subtitle, route column, summary)
+python preview.py --report escuela-b
 
 # Generate and open immediately
 python preview.py --open
@@ -216,17 +224,17 @@ saved locally to `./out/` instead.
 
 | Option | What it does |
 |--------|-------------|
-| 20 | Build the local Docker image (run once, or after any code change) |
-| 21 | Dry-run Rutas — fetches all bus routes, saves PDFs to `./out/` |
-| 22 | Dry-run Rutas — prompts for a route name, only generates that one |
-| 23 | Dry-run Escuela Dominical — all classes |
-| 24 | Dry-run Escuela Dominical — prompts for a class name |
+| 19 | Build the local Docker image (run once, or after any code change) |
+| 20 | Dry-run a report — prompts for one, fetches all its locations, saves PDFs to `./out/` |
+| 21 | Dry-run a report — prompts for a report and a location name, generates only that one |
 
-For option 22 and 24, the name field is a **case-insensitive substring match** — entering
+Options 20 and 21 list the reports from `reports.yaml` and let you pick one.
+
+For option 21, the location field is a **case-insensitive substring match** — entering
 `Ruta 1` will match `Ruta 1 - Bus` and `Ruta 1 - Van`. If the name doesn't match anything,
 the script prints the full list of available locations.
 
-**Prerequisites for options 20-24:**
+**Prerequisites for options 19-21:**
 - Docker installed and running
 - `credentials.json` in the project root
 - `.env` filled in with `PCO_APP_ID`, `PCO_SECRET`, `GOOGLE_DRIVE_PARENT_FOLDER_ID`
@@ -236,8 +244,8 @@ The testing story in full:
 | Method | Data | Drive upload |
 |--------|------|-------------|
 | `python preview.py` | Mock (fake names) | None — saves to `backend/previews/` |
-| `manage.sh → 21-24` | Real Planning Center | None — saves to `./out/` |
-| `manage.sh → 8-9` | Real Planning Center | Yes — uploads to Google Drive |
+| `manage.sh → 20-21` | Real Planning Center | None — saves to `./out/` |
+| `manage.sh → 8` | Real Planning Center | Yes — uploads to Google Drive |
 
 ---
 
@@ -247,8 +255,9 @@ The backend works standalone — either as the CLI job:
 
 ```bash
 cd backend
-python main.py "Rutas"
-python main.py "Escuela Dominical"
+python main.py --list-reports      # what's configured in reports.yaml
+python main.py rutas               # by report id
+python main.py "Escuela Dominical" # or by PCO event name — both resolve
 ```
 
 Or as the API server without a frontend (use the auto-generated docs at
@@ -294,6 +303,7 @@ This updates the `--args` on the Cloud Run jobs. The existing image is reused.
   planning_center_reports/
   logo.png
   assets/
+  reports.yaml            (optional — built-in defaults apply if absent)
   (credentials.json supplied at runtime — not baked in)
 ```
 

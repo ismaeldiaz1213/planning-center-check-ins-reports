@@ -3,9 +3,14 @@
 # Orchestration layer: fetch data from PCO, transform it into attendee records,
 # generate PDFs, and upload them to Google Drive.
 #
-# The two public functions — run_rutas and run_escuela_dominical — each own the
-# full pipeline for their respective PCO event. They are called from cli.py
-# after the theme and credentials have been set up.
+# There is one public entry point — run_report(spec) — which owns the full
+# pipeline for any configured report. Everything that used to differ between the
+# Rutas and Escuela Dominical runs (route lookup, helper detection, attendance
+# summaries, which PDFs to emit, where to upload them) is now a flag on the
+# ReportSpec, and every one of those flags is optional. See reports.py.
+#
+# run_rutas / run_escuela_dominical remain as thin wrappers for backwards
+# compatibility with existing callers.
 #
 # _build_attendees is kept here (rather than in pco_client) because it is a
 # transformation step that mixes API data with derived fields; it is tested
@@ -18,7 +23,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from planning_center_reports.config import GOOGLE_DRIVE_PARENT_FOLDER_ID, RUTAS_SUBTITLE
+from planning_center_reports.config import GOOGLE_DRIVE_PARENT_FOLDER_ID
 from planning_center_reports.drive_client import (
     get_drive_service,
     get_or_create_folder,
@@ -36,19 +41,21 @@ from planning_center_reports.pdf.rosters import (
     generate_address_pdf,
     generate_simple_roster_pdf,
 )
+from planning_center_reports.reports import OUTPUT_FILENAMES, ReportSpec, get_report
 
 
-def _get_route_mapping(weeks: int = 5) -> dict:
-    """Build a person_id → route_name mapping from Rutas check-ins.
+def _get_route_mapping(event_name: str, weeks: int = 5) -> dict:
+    """Build a person_id → route_name mapping from `event_name`'s check-ins.
 
     Returns a dict where keys are person_ids and values are route names
-    (e.g. "Ruta 1 - Bus"). Each person is mapped to the first/most recent
-    route they attended.
+    (e.g. "Ruta 1 - Bus"). Each person is mapped to the first route seen for
+    them in the returned check-in list. Reports with no bus ministry should skip
+    this call entirely rather than pass an event name.
     """
-    print("  Building route mappings from Rutas check-ins...", flush=True)
+    print(f"  Building route mappings from {event_name} check-ins...", flush=True)
     route_map = {}
     try:
-        event_id = get_event_id("Rutas")
+        event_id = get_event_id(event_name)
         event_period_ids, _, _ = get_recent_event_periods(event_id, weeks=weeks)
         checkins, included = get_checkins_for_event_periods(event_id, event_period_ids)
 
@@ -304,105 +311,125 @@ def _filter_locations(grouped: dict, location_filter: str | None) -> dict:
     return filtered
 
 
-def _save_pdf_locally(pdf_path: str, location_name: str, filename: str, output_dir: str) -> None:
-    """Copy a generated PDF to output_dir, prefixed with the location name."""
+def _save_pdf_locally(pdf_path: str, location_name: str, filename: str,
+                      output_dir: str, folder_prefix: str | None = None) -> None:
+    """Copy a generated PDF to output_dir, prefixed with the location name.
+
+    When the report defines a drive_folder_prefix, mirror that nesting locally so
+    a --dry-run tree matches what would land in Google Drive.
+    """
+    if folder_prefix:
+        output_dir = os.path.join(output_dir, _slug(folder_prefix))
     os.makedirs(output_dir, exist_ok=True)
-    safe_name = location_name.replace("/", "-").replace(" ", "_")
-    dest = os.path.join(output_dir, f"{safe_name}_{filename}")
+    dest = os.path.join(output_dir, f"{_slug(location_name)}_{filename}")
     shutil.copy(pdf_path, dest)
     print(f"  [dry-run] Saved → {dest}", flush=True)
 
 
-def run_rutas(weeks: int = 5, dry_run: bool = False, output_dir: str = "./out", location_filter: str | None = None):
-    """Run the full pipeline for the Rutas (bus routes) event.
+def _slug(name: str) -> str:
+    """Filesystem-safe form of a location or folder name."""
+    return name.replace("/", "-").replace(" ", "_").replace('"', "")
 
-    For each bus route location:
-      1. Fetches check-ins for the last `weeks` Sundays.
-      2. Enriches attendee records with person details from the People API.
-      3. Marks helpers (age 16+ from Junta de Rutas Attendance).
-      4. Generates Direcciones-Roster.pdf (address-grouped) and Roster.pdf (alphabetical).
-      5. Uploads both PDFs to the corresponding Drive subfolder (or saves locally if dry_run).
+
+def _resolve_drive_folder(drive_service, spec: ReportSpec, location_name: str) -> str:
+    """Return the Drive folder ID this report's PDFs for `location_name` belong in.
+
+    With no drive_folder_prefix the location folder sits directly under the
+    configured parent, which is the original behaviour. With a prefix, the
+    location folder is nested one level deeper — this is what keeps two reports
+    that share class names (e.g. the two Escuela Dominical sessions) from
+    overwriting each other's rosters.
     """
-    print("Finding event 'Rutas'...", flush=True)
-    event_id = get_event_id("Rutas")
-    print("Event ID:", event_id, flush=True)
+    parent_id = GOOGLE_DRIVE_PARENT_FOLDER_ID
+    if spec.drive_folder_prefix:
+        parent_id = get_or_create_folder(drive_service, parent_id, spec.drive_folder_prefix)
+    return get_or_create_folder(drive_service, parent_id, location_name)
 
-    print(f"Finding recent event periods (last {weeks} weeks)...", flush=True)
-    event_period_ids, _, _ = get_recent_event_periods(event_id, weeks=weeks)
 
-    print("Fetching check-ins...", flush=True)
-    checkins, included = get_checkins_for_event_periods(event_id, event_period_ids)
+def _nothing_to_generate(spec: ReportSpec, reason: str) -> None:
+    """Report that a run produced no PDFs, without treating it as a failure.
 
-    # Validate filter before the expensive helpers + person-detail fetches
-    _validate_location_filter(location_filter, included)
+    A report is often configured before its Check-Ins event exists or before
+    anyone has checked into it — a new class that has not started meeting yet.
+    That is an expected state, not an error, so the run exits 0 and says so
+    plainly; nothing about the schedule or the job needs to change.
+    """
+    print(f"\n  {reason}", flush=True)
+    print(f"  Nothing to generate for report '{spec.id}' — this is not an error.", flush=True)
+    print("  Rosters will be produced automatically once check-ins start "
+          "arriving for this event.", flush=True)
 
-    helpers_set = get_helpers_set(weeks=weeks)
 
-    grouped, location_lookup = _build_attendees(
-        checkins, included, weeks, helpers_set=helpers_set, location_filter=location_filter
-    )
-    print(f"Locations to process: {sorted(grouped.keys())}", flush=True)
+def run_report(
+    spec: ReportSpec,
+    weeks: int = 5,
+    dry_run: bool = False,
+    output_dir: str = "./out",
+    location_filter: str | None = None,
+):
+    """Run the full roster pipeline for one configured report.
 
-    drive_service = None
-    if not dry_run:
-        print("\nConnecting to Google Drive...", flush=True)
-        drive_service = get_drive_service()
+    For each location that had check-ins in the last `weeks` weeks:
+      1. Fetches check-ins for the report's PCO event.
+      2. Enriches attendee records with person details from the People API.
+      3. Optionally marks helpers          (only when spec.helpers_event is set).
+      4. Optionally maps people to routes  (only when spec.route_source_event is set).
+      5. Optionally builds per-Sunday attendance summaries (spec.attendance_summary).
+      6. Generates the PDFs named in spec.outputs.
+      7. Uploads them to Drive, or saves them to output_dir when dry_run.
 
-    for location_name, attendees in grouped.items():
-        vc = sum(1 for p in attendees if p.get("is_visitor"))
-        print(f"\nGenerating PDFs for {location_name} "
-              f"({len(attendees)} attendees, {vc} new this week)...", flush=True)
-
-        addr_pdf  = generate_address_pdf(location_name, attendees, "Direcciones-Roster.pdf")
-        lista_pdf = generate_simple_roster_pdf(
-            location_name, RUTAS_SUBTITLE, attendees, "Roster.pdf"
+    Every step after (2) is opt-in, so a report that declares none of them makes
+    no extra PCO calls at all.
+    """
+    print(f"Finding event {spec.pco_event!r} for report '{spec.id}'...", flush=True)
+    try:
+        event_id = get_event_id(spec.pco_event)
+    except Exception as exc:
+        _nothing_to_generate(
+            spec,
+            f"⚠ No Check-Ins event named {spec.pco_event!r} exists in Planning Center yet. ({exc})",
         )
-
-        try:
-            if dry_run:
-                _save_pdf_locally(addr_pdf, location_name, "Direcciones-Roster.pdf", output_dir)
-                _save_pdf_locally(lista_pdf, location_name, "Roster.pdf", output_dir)
-            else:
-                folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
-                upload_and_replace(drive_service, folder_id, addr_pdf,  "Direcciones-Roster.pdf")
-                upload_and_replace(drive_service, folder_id, lista_pdf, "Roster.pdf")
-                print(f"  ✓ Uploaded Direcciones-Roster.pdf + Roster.pdf for {location_name}", flush=True)
-        finally:
-            os.remove(addr_pdf)
-            os.remove(lista_pdf)
-
-
-def run_escuela_dominical(weeks: int = 5, dry_run: bool = False, output_dir: str = "./out", location_filter: str | None = None):
-    """Run the full pipeline for the Escuela Dominical (Sunday school) event.
-
-    For each class location:
-      1. Fetches check-ins for the last `weeks` Sundays.
-      2. Enriches attendee records with person details from the People API.
-      3. Maps each person to their bus route (from Rutas check-ins).
-      4. Filters out workers (age 16+ from Junta de Rutas Attendance).
-      5. Generates Roster.pdf with route information and attendance summary.
-      6. Uploads it to the corresponding Drive subfolder (or saves locally if dry_run).
-    """
-    print("Finding event 'Escuela Dominical'...", flush=True)
-    event_id = get_event_id("Escuela Dominical")
+        return
     print("Event ID:", event_id, flush=True)
 
     print(f"Finding recent event periods (last {weeks} weeks)...", flush=True)
     period_ids, period_dates, period_starts_at = get_recent_event_periods(event_id, weeks=weeks)
+    if not period_ids:
+        _nothing_to_generate(
+            spec, f"⚠ {spec.pco_event!r} has no event periods in the last {weeks} weeks."
+        )
+        return
 
-    print("Fetching Escuela Dominical check-ins...", flush=True)
+    print("Fetching check-ins...", flush=True)
     checkins, included = get_checkins_for_event_periods(event_id, period_ids)
+    if not checkins:
+        _nothing_to_generate(
+            spec, f"⚠ No one has checked into {spec.pco_event!r} in the last {weeks} weeks."
+        )
+        return
 
-    # Validate filter before the expensive helpers + route-map + person-detail fetches
+    # Validate filter before the expensive helper, route-map, and person-detail fetches
     _validate_location_filter(location_filter, included)
 
-    helpers_set = get_helpers_set(weeks=weeks)
-    route_map = _get_route_mapping(weeks=weeks)
+    # Optional feature: helper detection. Skipped entirely when unconfigured.
+    helpers_set = (
+        get_helpers_set(spec.helpers_event, weeks=weeks, min_age=spec.helper_min_age)
+        if spec.helpers_event else set()
+    )
+
+    # Optional feature: bus-route lookup. Skipped entirely when unconfigured.
+    route_map = (
+        _get_route_mapping(spec.route_source_event, weeks=weeks)
+        if spec.route_source_event else {}
+    )
 
     grouped, location_lookup = _build_attendees(
         checkins, included, weeks, helpers_set=helpers_set, route_map=route_map,
-        location_filter=location_filter
+        location_filter=location_filter,
     )
+    if not grouped:
+        _nothing_to_generate(spec, "⚠ No attendees matched after filtering.")
+        return
     print(f"Locations to process: {sorted(grouped.keys())}", flush=True)
 
     # Inverse map so we can look up location_id by name inside the loop
@@ -414,33 +441,64 @@ def run_escuela_dominical(weeks: int = 5, dry_run: bool = False, output_dir: str
         drive_service = get_drive_service()
 
     for location_name, attendees in grouped.items():
-        # Helpers remain on the roster — they just have no route (cleared in _build_attendees)
         vc = sum(1 for p in attendees if p.get("is_visitor"))
-        print(f"\nGenerating roster for {location_name} "
+        print(f"\nGenerating PDFs for {location_name} "
               f"({len(attendees)} attendees, {vc} new this week)...", flush=True)
 
-        # Build per-Sunday attendance counts for this class
-        location_id       = name_to_location_id.get(location_name)
-        person_created_at = {
-            p["person_id"]: p.get("created_at", "")
-            for p in attendees if p.get("person_id")
-        }
-        sunday_data = _build_sunday_data(
-            checkins, period_ids, period_dates, location_id,
-            helpers_set, period_starts_at, person_created_at,
-        )
+        sunday_data = None
+        if spec.attendance_summary:
+            person_created_at = {
+                p["person_id"]: p.get("created_at", "")
+                for p in attendees if p.get("person_id")
+            }
+            sunday_data = _build_sunday_data(
+                checkins, period_ids, period_dates,
+                name_to_location_id.get(location_name),
+                helpers_set, period_starts_at, person_created_at,
+            )
 
-        pdf_file = generate_simple_roster_pdf(
-            location_name, "Escuela Dominical", attendees, "Roster.pdf",
-            show_route=True, sunday_data=sunday_data,
-        )
+        generated: list[tuple[str, str]] = []   # (local temp path, drive filename)
+        for kind in spec.outputs:
+            filename = OUTPUT_FILENAMES[kind]
+            if kind == "address":
+                path = generate_address_pdf(location_name, attendees, filename)
+            else:
+                path = generate_simple_roster_pdf(
+                    location_name, spec.pdf_subtitle, attendees, filename,
+                    show_route=spec.show_route, sunday_data=sunday_data,
+                )
+            generated.append((path, filename))
 
         try:
             if dry_run:
-                _save_pdf_locally(pdf_file, location_name, "Roster.pdf", output_dir)
+                for path, filename in generated:
+                    _save_pdf_locally(path, location_name, filename, output_dir,
+                                      spec.drive_folder_prefix)
             else:
-                folder_id = get_or_create_folder(drive_service, GOOGLE_DRIVE_PARENT_FOLDER_ID, location_name)
-                upload_and_replace(drive_service, folder_id, pdf_file, "Roster.pdf")
-                print(f"  ✓ Uploaded Roster.pdf for {location_name}", flush=True)
+                folder_id = _resolve_drive_folder(drive_service, spec, location_name)
+                for path, filename in generated:
+                    upload_and_replace(drive_service, folder_id, path, filename)
+                names = " + ".join(f for _, f in generated)
+                print(f"  ✓ Uploaded {names} for {location_name}", flush=True)
         finally:
-            os.remove(pdf_file)
+            for path, _ in generated:
+                if os.path.exists(path):
+                    os.remove(path)
+
+
+# ── Backwards-compatible wrappers ─────────────────────────────────────────────
+# Kept so existing callers and tests that import run_rutas / run_escuela_dominical
+# keep working. New code should call run_report() with a ReportSpec.
+
+def run_rutas(weeks: int = 5, dry_run: bool = False, output_dir: str = "./out",
+              location_filter: str | None = None):
+    """Run the report configured under the id 'rutas' (or the PCO event "Rutas")."""
+    return run_report(get_report("rutas"), weeks=weeks, dry_run=dry_run,
+                      output_dir=output_dir, location_filter=location_filter)
+
+
+def run_escuela_dominical(weeks: int = 5, dry_run: bool = False, output_dir: str = "./out",
+                          location_filter: str | None = None):
+    """Run the report configured under the id 'escuela' (or "Escuela Dominical")."""
+    return run_report(get_report("escuela"), weeks=weeks, dry_run=dry_run,
+                      output_dir=output_dir, location_filter=location_filter)

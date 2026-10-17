@@ -30,6 +30,22 @@ warn()    { echo -e "${YELLOW}⚠  ${NC}$1"; }
 error()   { echo -e "${RED}✗  ${NC}$1"; exit 1; }
 prompt()  { echo -e "${BOLD}→  $1${NC}"; }
 
+# ── Report registry ───────────────────────────────────────────────────────────
+# The reports to create Cloud Run jobs for come from reports.yaml (or the
+# built-in defaults when there is no such file), read through the CLI so this
+# script never has to know the report names. Falls back to the two original
+# reports if Python is unavailable.
+report_ids() {
+    local ids
+    ids=$(cd "$(dirname "$0")/backend" && python3 main.py --list-reports --format ids 2>/dev/null) || ids=""
+    if [[ -z "$ids" ]]; then
+        warn "Could not read reports.yaml — falling back to 'rutas escuela'" >&2
+        echo "rutas escuela"
+    else
+        echo "$ids"
+    fi
+}
+
 echo ""
 echo -e "${BOLD}============================================================${NC}"
 echo -e "${BOLD}   Church Roster Generator — Google Cloud Setup${NC}"
@@ -41,7 +57,7 @@ echo "  2. Create (or reuse) a Google Cloud project"
 echo "  3. Enable the required APIs"
 echo "  4. Store your PCO credentials and credentials.json securely in Secret Manager"
 echo "  5. Build and push the Docker image"
-echo "  6. Create Cloud Run Jobs for Rutas + Escuela Dominical"
+echo "  6. Create one Cloud Run Job per report in reports.yaml"
 echo "  7. Schedule them to run every Monday at 2 AM US Central"
 echo ""
 read -rp "Press ENTER to begin, or Ctrl+C to cancel..."
@@ -256,8 +272,12 @@ create_job() {
     success "Job created: $job_name"
 }
 
-create_job "roster-rutas"             "Rutas"
-create_job "roster-escuela-dominical" "Escuela Dominical"
+# One Cloud Run job per report configured in reports.yaml. report_ids() is
+# defined near the top of this script and reads the config via the CLI, so
+# adding a report there is enough — no edit needed here.
+for report_id in $(report_ids); do
+    create_job "roster-$report_id" "$report_id"
+done
 
 # ── Step 10: Schedule the jobs ────────────────────────────────────────────────
 echo ""
@@ -296,8 +316,9 @@ schedule_job() {
     success "Scheduled: $scheduler_name"
 }
 
-schedule_job "run-roster-rutas"             "roster-rutas"
-schedule_job "run-roster-escuela-dominical" "roster-escuela-dominical"
+for report_id in $(report_ids); do
+    schedule_job "run-roster-$report_id" "roster-$report_id"
+done
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""

@@ -2,21 +2,25 @@
 """
 demo_run.py — called by api.py when DEMO_MODE=true instead of main.py.
 
-Simulates a realistic Rutas/Escuela Dominical job using mock data.
+Simulates a realistic roster job for any configured report using mock data.
 Generates real PDFs and saves them to backend/previews/; skips Google Drive.
 
+Which log lines appear, whether the Ruta column is drawn, and whether attendance
+summary tables are included all come from the report's spec in reports.yaml —
+so a newly configured report gets a working demo with no changes here.
+
 Usage (for manual testing):
-    python demo_run.py Rutas
-    python demo_run.py "Escuela Dominical" primavera
+    python demo_run.py rutas
+    python demo_run.py escuela-b primavera
 """
 import sys
 import time
 from pathlib import Path
 
 import planning_center_reports.config as _cfg
-from planning_center_reports.config import RUTAS_SUBTITLE
 from planning_center_reports.mock_data import MOCK_ATTENDEES, MOCK_SUNDAY_DATA
 from planning_center_reports.pdf.rosters import generate_address_pdf, generate_simple_roster_pdf
+from planning_center_reports.reports import OUTPUT_FILENAMES, ReportConfigError, get_report
 
 
 def _log(msg: str) -> None:
@@ -24,9 +28,14 @@ def _log(msg: str) -> None:
 
 
 def main() -> None:
-    job_type  = sys.argv[1] if len(sys.argv) > 1 else "Rutas"
-    theme_arg = sys.argv[2] if len(sys.argv) > 2 else ""
-    is_escuela = "escuela" in job_type.lower()
+    report_key = sys.argv[1] if len(sys.argv) > 1 else "rutas"
+    theme_arg  = sys.argv[2] if len(sys.argv) > 2 else ""
+
+    try:
+        spec = get_report(report_key)
+    except ReportConfigError as exc:
+        _log(f"[DEMO MODE] {exc}")
+        sys.exit(1)
 
     theme_key   = theme_arg if theme_arg in _cfg.THEMES else None
     _cfg._theme = _cfg.THEMES[theme_key]
@@ -36,11 +45,11 @@ def main() -> None:
 
     t_start = time.time()
 
-    _log(f"[DEMO MODE] Starting {job_type} job...")
+    _log(f"[DEMO MODE] Starting {spec.label} job...")
     time.sleep(0.4)
     _log("Connecting to Planning Center API...")
     time.sleep(0.6)
-    _log("  Fetching event periods...")
+    _log(f"  Looking up event {spec.pco_event!r}...")
     time.sleep(0.5)
     _log("  Found 2 event periods")
     time.sleep(0.3)
@@ -55,45 +64,48 @@ def main() -> None:
     _log("  Total check-ins: 14")
     time.sleep(0.3)
 
-    if not is_escuela:
-        locations = ["Ruta 1 - Bus", "Ruta 2 - Van", "Ruta 3 - Carro"]
-        _log(f"Locations to process: {locations}")
-        time.sleep(0.3)
-        _log("Fetching helpers (Junta de Rutas)...")
+    locations = list(spec.demo_locations) or [f"{spec.label} — Demo"]
+    _log(f"Locations to process: {locations}")
+    time.sleep(0.3)
+
+    if spec.helpers_event:
+        _log(f"Fetching helpers ({spec.helpers_event})...")
         time.sleep(0.5)
         _log("  Found 1 helper")
         time.sleep(0.3)
 
-        for loc in locations:
-            attendees = [a for a in MOCK_ATTENDEES if a.get("route") == loc]
-            _log(f"Processing {loc} ({len(attendees)} attendees)...")
-            time.sleep(0.3)
-            slug        = loc.replace(" ", "_").replace("/", "-")
-            roster_path = str(out_dir / f"demo_{slug}_Roster.pdf")
-            addr_path   = str(out_dir / f"demo_{slug}_Direcciones-Roster.pdf")
-            generate_simple_roster_pdf(loc, RUTAS_SUBTITLE, attendees, roster_path)
-            generate_address_pdf(loc, attendees, addr_path)
-            _log("  [DEMO MODE] Skipping Google Drive upload")
-            _log("  ✓ Roster.pdf saved")
-            _log("  ✓ Direcciones-Roster.pdf saved")
-            time.sleep(0.2)
-    else:
-        classes = ["Clase Primaria", "Clase Secundaria"]
-        _log(f"Locations to process: {classes}")
-        time.sleep(0.3)
+    if spec.route_source_event:
+        _log(f"  Building route mappings from {spec.route_source_event} check-ins...")
+        time.sleep(0.4)
+        _log(f"  Mapped {len(MOCK_ATTENDEES)} people to routes.")
+        time.sleep(0.2)
 
-        for class_name in classes:
-            _log(f"Processing {class_name} ({len(MOCK_ATTENDEES)} attendees)...")
-            time.sleep(0.4)
-            slug = class_name.replace(" ", "_")
-            path = str(out_dir / f"demo_{slug}_Escuela-Roster.pdf")
-            generate_simple_roster_pdf(
-                class_name, "Escuela Dominical", MOCK_ATTENDEES, path,
-                show_route=True, sunday_data=MOCK_SUNDAY_DATA,
-            )
-            _log("  [DEMO MODE] Skipping Google Drive upload")
-            _log("  ✓ Escuela-Roster.pdf saved")
-            time.sleep(0.2)
+    for loc in locations:
+        # For the bus-route demo each location shows only its own riders;
+        # class-style reports show the whole mock roster.
+        attendees = [a for a in MOCK_ATTENDEES if a.get("route") == loc]
+        if not attendees:
+            attendees = MOCK_ATTENDEES
+
+        _log(f"Processing {loc} ({len(attendees)} attendees)...")
+        time.sleep(0.3)
+        slug = loc.replace(" ", "_").replace("/", "-").replace('"', "")
+
+        for kind in spec.outputs:
+            filename = OUTPUT_FILENAMES[kind]
+            path = str(out_dir / f"demo_{slug}_{filename}")
+            if kind == "address":
+                generate_address_pdf(loc, attendees, path)
+            else:
+                generate_simple_roster_pdf(
+                    loc, spec.pdf_subtitle, attendees, path,
+                    show_route=spec.show_route,
+                    sunday_data=MOCK_SUNDAY_DATA if spec.attendance_summary else None,
+                )
+            _log(f"  ✓ {filename} saved")
+
+        _log("  [DEMO MODE] Skipping Google Drive upload")
+        time.sleep(0.2)
 
     elapsed = time.time() - t_start
     _log(f"\nDone in {elapsed:.1f}s")

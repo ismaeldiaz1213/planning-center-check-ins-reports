@@ -29,6 +29,13 @@ from google.auth.transport import requests as _google_requests
 from google.oauth2 import id_token as _google_id_token
 from pydantic import BaseModel, Field
 
+from planning_center_reports.reports import (
+    VALID_THEMES,
+    ReportConfigError,
+    enabled_reports,
+    get_report,
+)
+
 # ── Demo mode ─────────────────────────────────────────────────────────────────
 # Set DEMO_MODE=true to serve a public demo: auth is bypassed, job runs use
 # mock data via demo_run.py, and settings writes are accepted but not persisted.
@@ -164,17 +171,17 @@ class RunJobRequest(BaseModel):
     theme: Optional[str] = None
 
 
-VALID_THEMES = {"primavera", "verano", "otono", "invierno"}
+class ReportSettingsWrite(BaseModel):
+    weeks: Optional[int] = Field(default=None, ge=1, le=52)
+    theme: Optional[str] = None
 
 
 class SettingsWrite(BaseModel):
     pco_app_id: Optional[str] = None
     pco_secret: Optional[str] = None
     google_drive_parent_folder_id: Optional[str] = None
-    rutas_weeks: Optional[int] = Field(default=None, ge=1, le=52)
-    rutas_theme: Optional[str] = None
-    escuela_weeks: Optional[int] = Field(default=None, ge=1, le=52)
-    escuela_theme: Optional[str] = None
+    # Per-report overrides keyed by report id, e.g. {"escuela-b": {"weeks": 6}}.
+    reports: Optional[dict[str, ReportSettingsWrite]] = None
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -299,20 +306,37 @@ def get_job(job_id: str, since: int = Query(default=0, ge=0), _: dict = Depends(
     }
 
 
+@app.get("/api/reports")
+def list_reports(_: dict = Depends(_verify_google_token)):
+    """Return the reports configured in reports.yaml, for the dashboard tiles."""
+    try:
+        return {"reports": [spec.public_dict() for spec in enabled_reports()]}
+    except ReportConfigError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/settings")
 def get_settings(_: dict = Depends(_verify_google_token)):
     """Return current editable settings (reads live env + .env file)."""
     env = _read_dotenv()
     def _get(key: str, default: str = "") -> str:
         return os.environ.get(key) or env.get(key, default)
+
+    reports: dict[str, dict] = {}
+    for spec in enabled_reports():
+        raw_weeks = _get(f"{spec.env_prefix}_DEFAULT_WEEKS", "")
+        raw_theme = _get(f"{spec.env_prefix}_DEFAULT_THEME", "")
+        reports[spec.id] = {
+            "label": spec.label,
+            "weeks": int(raw_weeks) if raw_weeks.isdigit() else spec.default_weeks,
+            "theme": raw_theme if raw_theme in VALID_THEMES else (spec.default_theme or ""),
+        }
+
     return {
         "pco_app_id":                  _get("PCO_APP_ID"),
         "pco_secret":                  _get("PCO_SECRET"),
         "google_drive_parent_folder_id": _get("GOOGLE_DRIVE_PARENT_FOLDER_ID"),
-        "rutas_weeks":                 int(_get("RUTAS_DEFAULT_WEEKS", "5")),
-        "rutas_theme":                 _get("RUTAS_DEFAULT_THEME", ""),
-        "escuela_weeks":               int(_get("ESCUELA_DEFAULT_WEEKS", "5")),
-        "escuela_theme":               _get("ESCUELA_DEFAULT_THEME", ""),
+        "reports":                     reports,
     }
 
 
@@ -328,14 +352,19 @@ def update_settings(body: SettingsWrite, _: dict = Depends(_verify_google_token)
         updates["PCO_SECRET"] = body.pco_secret
     if body.google_drive_parent_folder_id is not None:
         updates["GOOGLE_DRIVE_PARENT_FOLDER_ID"] = body.google_drive_parent_folder_id
-    if body.rutas_weeks is not None:
-        updates["RUTAS_DEFAULT_WEEKS"] = str(body.rutas_weeks)
-    if body.rutas_theme is not None:
-        updates["RUTAS_DEFAULT_THEME"] = body.rutas_theme if body.rutas_theme in VALID_THEMES else ""
-    if body.escuela_weeks is not None:
-        updates["ESCUELA_DEFAULT_WEEKS"] = str(body.escuela_weeks)
-    if body.escuela_theme is not None:
-        updates["ESCUELA_DEFAULT_THEME"] = body.escuela_theme if body.escuela_theme in VALID_THEMES else ""
+
+    for report_id, values in (body.reports or {}).items():
+        try:
+            spec = get_report(report_id)
+        except ReportConfigError:
+            raise HTTPException(status_code=404, detail=f"Unknown report '{report_id}'")
+        if values.weeks is not None:
+            updates[f"{spec.env_prefix}_DEFAULT_WEEKS"] = str(values.weeks)
+        if values.theme is not None:
+            updates[f"{spec.env_prefix}_DEFAULT_THEME"] = (
+                values.theme if values.theme in VALID_THEMES else ""
+            )
+
     if updates:
         _write_dotenv(updates)
     return {"ok": True}
@@ -350,36 +379,35 @@ def list_jobs(_: dict = Depends(_verify_google_token)):
     return {"jobs": jobs}
 
 
-@app.post("/api/jobs/rutas/run", status_code=202)
-def run_rutas(req: RunJobRequest = RunJobRequest(), _: dict = Depends(_verify_google_token)):
-    """Trigger python main.py Rutas in the background."""
-    weeks = req.weeks or int(os.getenv("RUTAS_DEFAULT_WEEKS", "5"))
-    theme = req.theme or os.getenv("RUTAS_DEFAULT_THEME", "")
-    if DEMO_MODE:
-        demo_theme = theme if theme in VALID_THEMES else ""
-        cmd = [sys.executable, "demo_run.py", "Rutas", demo_theme]
-    else:
-        cmd = [sys.executable, "main.py", "Rutas", "--weeks", str(weeks)]
-        if theme and theme in VALID_THEMES:
-            cmd += ["--theme", theme]
-    job_id = _create_job("rutas")
-    _run_subprocess(job_id, cmd)
-    return {"job_id": job_id}
+@app.post("/api/jobs/{report_id}/run", status_code=202)
+def run_report_job(
+    report_id: str,
+    req: RunJobRequest = RunJobRequest(),
+    _: dict = Depends(_verify_google_token),
+):
+    """Trigger a background roster run for one configured report.
 
+    The report id doubles as the path segment, so the original
+    /api/jobs/rutas/run and /api/jobs/escuela/run URLs keep working.
+    """
+    try:
+        spec = get_report(report_id)
+    except ReportConfigError:
+        raise HTTPException(status_code=404, detail=f"Unknown report '{report_id}'")
+    if not spec.enabled:
+        raise HTTPException(status_code=404, detail=f"Report '{spec.id}' is disabled")
 
-@app.post("/api/jobs/escuela/run", status_code=202)
-def run_escuela(req: RunJobRequest = RunJobRequest(), _: dict = Depends(_verify_google_token)):
-    """Trigger python main.py 'Escuela Dominical' in the background."""
-    weeks = req.weeks or int(os.getenv("ESCUELA_DEFAULT_WEEKS", "5"))
-    theme = req.theme or os.getenv("ESCUELA_DEFAULT_THEME", "")
+    weeks = req.weeks or spec.resolved_weeks()
+    theme = req.theme or spec.resolved_theme() or ""
     if DEMO_MODE:
-        demo_theme = theme if theme in VALID_THEMES else ""
-        cmd = [sys.executable, "demo_run.py", "Escuela Dominical", demo_theme]
+        cmd = [sys.executable, "demo_run.py", spec.id,
+               theme if theme in VALID_THEMES else ""]
     else:
-        cmd = [sys.executable, "main.py", "Escuela Dominical", "--weeks", str(weeks)]
-        if theme and theme in VALID_THEMES:
+        cmd = [sys.executable, "main.py", spec.id, "--weeks", str(weeks)]
+        if theme in VALID_THEMES:
             cmd += ["--theme", theme]
-    job_id = _create_job("escuela")
+
+    job_id = _create_job(spec.id)
     _run_subprocess(job_id, cmd)
     return {"job_id": job_id}
 

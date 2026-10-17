@@ -10,15 +10,18 @@ vi.mock('../../api/client', () => ({
 }))
 
 import { fetchSettings, saveSettings } from '../../api/client'
+import type { Settings } from '../../types'
 
-const MOCK_SETTINGS = {
+const MOCK_SETTINGS: Settings = {
   pco_app_id: 'app-id-123',
   pco_secret: 'secret-456',
   google_drive_parent_folder_id: 'folder-789',
-  rutas_weeks: 5,
-  rutas_theme: '',
-  escuela_weeks: 4,
-  escuela_theme: 'primavera',
+  // Run defaults are keyed by report id — one section is rendered per entry.
+  reports: {
+    rutas:       { label: 'Rutas',                  weeks: 5, theme: ''          },
+    escuela:     { label: 'Escuela Dominical',      weeks: 4, theme: 'primavera' },
+    'escuela-b': { label: '"B" Escuela Dominical',  weeks: 6, theme: ''          },
+  },
 }
 
 describe('SettingsModal', () => {
@@ -70,16 +73,47 @@ describe('SettingsModal', () => {
     await waitFor(() => {
       expect(screen.getByText('Credenciales PCO')).toBeInTheDocument()
       expect(screen.getByText('Google Drive')).toBeInTheDocument()
-      expect(screen.getByText('Valores por Defecto – Rutas')).toBeInTheDocument()
-      expect(screen.getByText('Valores por Defecto – Escuela')).toBeInTheDocument()
+      expect(screen.getByText('Rutas — Valores por Defecto')).toBeInTheDocument()
+      expect(screen.getByText('Escuela Dominical — Valores por Defecto')).toBeInTheDocument()
+      expect(screen.getByText('"B" Escuela Dominical — Valores por Defecto')).toBeInTheDocument()
     })
   })
 
-  it('displays week count inputs with loaded values', async () => {
+  it('displays one week-count input per report, with loaded values', async () => {
     renderWithProviders(<SettingsModal onClose={vi.fn()} />)
     await waitFor(() => {
       expect(screen.getByDisplayValue('5')).toBeInTheDocument()
       expect(screen.getByDisplayValue('4')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('6')).toBeInTheDocument()
+    })
+  })
+
+  it('renders a section for a report it has never seen before', async () => {
+    vi.mocked(fetchSettings).mockResolvedValue({
+      ...MOCK_SETTINGS,
+      reports: { ninos: { label: 'Clases de Niños', weeks: 3, theme: '' } },
+    })
+    renderWithProviders(<SettingsModal onClose={vi.fn()} />)
+    await waitFor(() => {
+      expect(screen.getByText('Clases de Niños — Valores por Defecto')).toBeInTheDocument()
+    })
+  })
+
+  it('edits one report\'s weeks without touching the others', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<SettingsModal onClose={vi.fn()} />)
+    await waitFor(() => screen.getByDisplayValue('6'))
+
+    const input = screen.getByLabelText('Semanas recientes a incluir', { selector: '#weeks-escuela-b' })
+    await user.clear(input)
+    await user.type(input, '8')
+    await user.click(screen.getByRole('button', { name: /guardar$/i }))
+
+    await waitFor(() => {
+      const calls = vi.mocked(saveSettings).mock.calls
+      const body = calls[calls.length - 1][0]
+      expect(body.reports!['escuela-b'].weeks).toBe(8)
+      expect(body.reports!.rutas.weeks).toBe(5)
     })
   })
 
@@ -94,8 +128,11 @@ describe('SettingsModal', () => {
         pco_app_id: 'app-id-123',
         pco_secret: 'secret-456',
         google_drive_parent_folder_id: 'folder-789',
-        rutas_weeks: 5,
-        escuela_weeks: 4,
+        reports: {
+          rutas:       { weeks: 5, theme: ''          },
+          escuela:     { weeks: 4, theme: 'primavera' },
+          'escuela-b': { weeks: 6, theme: ''          },
+        },
       }))
     })
   })

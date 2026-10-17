@@ -10,28 +10,44 @@ import PreviewModal from './components/PreviewModal'
 import JobModal from './components/JobModal'
 import SettingsModal from './components/SettingsModal'
 import LogsModal from './components/LogsModal'
+import { useReports } from './hooks/useReports'
 
-export type ActiveModal = 'previews' | 'rutas' | 'escuela' | 'settings' | 'logs' | null
+/** Fixed dashboard panels. Anything else is a report id from reports.yaml. */
+export type FixedModal = 'previews' | 'settings' | 'logs'
+export type ActiveModal = FixedModal | string | null
+
+const FIXED_MODALS: readonly string[] = ['previews', 'settings', 'logs']
 
 function AppShell() {
   const { credential, authRequired } = useAuth()
   const [modal, setModal] = useState<ActiveModal>(null)
+  const { reports, loading: reportsLoading, error: reportsError } = useReports()
 
   if (authRequired && !credential) return <LoginOverlay />
+
+  // A modal id that is not one of the fixed panels is a report id.
+  const activeReport = modal && !FIXED_MODALS.includes(modal)
+    ? reports.find(r => r.id === modal) ?? null
+    : null
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--blue-bg)' }}>
       <Navbar />
       <div style={{ flex: 1 }}>
-        <HomePage onOpen={setModal} />
+        <HomePage
+          onOpen={setModal}
+          reports={reports}
+          reportsLoading={reportsLoading}
+          reportsError={reportsError}
+        />
       </div>
       <Footer />
 
       {modal === 'previews' && (
         <PreviewModal onClose={() => setModal(null)} />
       )}
-      {(modal === 'rutas' || modal === 'escuela') && (
-        <JobModal type={modal} onClose={() => setModal(null)} />
+      {activeReport && (
+        <JobModal report={activeReport} onClose={() => setModal(null)} />
       )}
       {modal === 'settings' && (
         <SettingsModal onClose={() => setModal(null)} />

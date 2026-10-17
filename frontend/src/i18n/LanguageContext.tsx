@@ -7,6 +7,10 @@ interface LangCtx {
   lang:    Lang
   setLang: (l: Lang) => void
   t:       (key: TranslationKey) => string
+  /** Translate `key` if it exists, otherwise return `fallback`.
+   *  Reports are configured on the backend, so a newly added report has no
+   *  translation key — its label from /api/reports is used instead. */
+  tOr:     (key: string, fallback: string) => string
 }
 
 const LangContext = createContext<LangCtx | null>(null)
@@ -31,8 +35,11 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const t = (key: TranslationKey) => strings[key][lang]
 
+  const tOr = (key: string, fallback: string) =>
+    key in strings ? strings[key as TranslationKey][lang] : fallback
+
   return (
-    <LangContext.Provider value={{ lang, setLang, t }}>
+    <LangContext.Provider value={{ lang, setLang, t, tOr }}>
       {children}
     </LangContext.Provider>
   )

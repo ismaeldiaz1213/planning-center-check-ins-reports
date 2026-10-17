@@ -45,18 +45,33 @@ Drive folder structure (auto-created by the script):
          Roster.pdf
       📁 Kinder/
          ...
+   📁 "C" Escuela Dominical/            ← drive_folder_prefix keeps C's classes
+      📁 "C" 7th Boys/                     separate from the A session's
+         Roster.pdf
+      📁 "C" 7th Girls/
+         ...
 ```
 
 ---
 
-## Planning Center event names
+## Reports
 
-These are passed as arguments to `main.py` and must match exactly (case-sensitive):
+Configured in `reports.yaml` at the project root. The `pco_event` value must match the
+Check-Ins event name in Planning Center exactly (case-sensitive). Full schema:
+[docs/reports.md](reports.md).
 
-| Event | Argument |
-|-------|---------|
-| Bus routes | `Rutas` |
-| Sunday school | `Escuela Dominical` |
+| Report id | PCO event | Notes |
+|-----------|-----------|-------|
+| `rutas` | `Rutas` | Bus routes. Two PDFs per route; helpers from Junta de Rutas. |
+| `escuela` | `Escuela Dominical` | Sunday school. Ruta column + attendance summary. |
+| `escuela-c` | `"C" Escuela Dominical` | Bus-route kids' Sunday school, 7th–12th (formerly "B"). Same features, uploaded under its own Drive folder so class names don't collide with the A session's. |
+
+Either the id or the PCO event name works as the CLI argument:
+
+```bash
+python main.py escuela-c
+python main.py '"C" Escuela Dominical'
+```
 
 ---
 
@@ -75,10 +90,14 @@ GCP_SA_EMAIL=ministry-account-pc@ibl-planning-center-check-ins.iam.gserviceaccou
 
 ## Schedule
 
+One Cloud Run job and one Cloud Scheduler entry per report, named `roster-<id>` and
+`run-roster-<id>`. `setup_gcloud.sh` creates them from `reports.yaml`.
+
 | Job | Cron | Local time |
 |-----|------|-----------|
-| Rutas | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
-| Escuela Dominical | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
+| `roster-rutas` | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
+| `roster-escuela` | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
+| `roster-escuela-c` | `0 8 * * 1` | Monday 2:00 AM CST / 3:00 AM CDT |
 
 During summer (CDT, roughly March–November), the 8:00 AM UTC run lands at 3 AM local
 rather than 2 AM. Adjust to `0 7 * * 1` in Cloud Scheduler if running at 2 AM is important.
@@ -88,14 +107,16 @@ rather than 2 AM. Adjust to `0 7 * * 1` in Cloud Scheduler if running at 2 AM is
 ## Helpers / Junta de Rutas
 
 Bus workers (helpers) are members 16+ who appear on the Junta de Rutas attendance list.
-They are checked into the Escuela Dominical event but belong to a helper group rather than
-a Sunday school class. In the generated PDFs:
+They are checked into a Sunday school event but belong to a helper group rather than
+a class. Helper detection is opt-in per report via `helpers_event` in `reports.yaml`;
+all three of IBL's reports use it. In the generated PDFs:
 
 - They appear on the Sunday school roster with their name and attendance rate
 - The **Ruta** column is blank (they are not assigned to a class route)
 - They are **not** counted toward route headcount totals in the attendance summary table
 
-The helper detection logic lives in `backend/planning_center_reports/services.py`.
+The helper detection logic lives in `backend/planning_center_reports/pco_client.py`
+(`get_helpers_set`), applied in `services.py` only when a report declares `helpers_event`.
 
 ---
 
@@ -143,10 +164,42 @@ grade promotion.
 
 ---
 
+## "C" Escuela Dominical backfill (`backend/backfill_bus_class.py`)
+
+`"C" Escuela Dominical` (formerly "B") is the bus-route kids' Sunday school, 7th–12th
+grade, 10:45. Its locations:
+
+```
+"C" 7th Boys          "C" 7th Girls
+"C" 8th Boys          "C" 8th Girls
+"C" 9th &10th Boys    "C" 9th &10th Girls
+"C" 11th &12th Coed   Teachers and Helpers
+```
+
+A new event has no check-in history, so pre-select has nothing to suggest. The
+backfill checks every bus kid into their "C" class for the most recent Sunday:
+
+- **Who:** anyone checked into a `Ruta …` location of `Rutas` in the last 5 weeks,
+  under 20, who **also** checked into the regular `Escuela Dominical` in that window.
+  Riders with no Sunday school check-in are left out unless you pass
+  `--include-non-attendees`. Drivers/captains/helpers check into
+  `Chofer, Capitanes, Ayudantes`, so they're never picked up.
+- **Which class:** People grade + gender. A kid with no grade falls back to the class
+  they've been attending in the regular `Escuela Dominical`. Anyone still unplaced is
+  listed as skipped — fix their grade in People and re-run (re-runs are safe; existing
+  check-ins come back as duplicates).
+
+```bash
+make backfill-bus-class DRY_RUN=1   # preview the per-class lists
+make backfill-bus-class             # submit (needs PCO_SESSION_COOKIE, like promote-checkin)
+```
+
+---
+
 ## Web UI
 
 The web UI is served at the `roster-api` Cloud Run Service URL (retrieve with
-`./manage.sh → option 17`). Access is restricted to `@iblibertad.org` and
+`./manage.sh → option 16`). Access is restricted to `@iblibertad.org` and
 `@iblibertad.com` Google accounts via the `ALLOWED_GOOGLE_DOMAINS` setting.
 
 The `footer.church` translation key in `frontend/src/i18n/translations.ts` is set to

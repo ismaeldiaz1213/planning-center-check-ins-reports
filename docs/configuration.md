@@ -1,7 +1,11 @@
 # Configuration Reference
 
-All runtime configuration is done through environment variables. Copy `.env.example` to `.env`
-and fill in the values before running anything.
+Credentials and runtime settings are configured through environment variables. Copy
+`.env.example` to `.env` and fill in the values before running anything.
+
+**Which reports get generated** — the Planning Center events, which PDFs they produce, and
+whether they use bus routes, helper detection, or attendance summaries — is configured
+separately in `reports.yaml`. See **[docs/reports.md](reports.md)**.
 
 ---
 
@@ -79,6 +83,22 @@ runs without authentication (any request is accepted — local development only)
 | `CHURCH_VERSE_REF` | `Marcos 16:15 — RV1960` | Verse reference shown in PDF footers |
 | `PCO_SESSION_COOKIE` | *(none)* | Only needed for `backend/promote_checkins.py` (grade promotion) — see [docs/grade-promotion.md](grade-promotion.md) |
 | `PCO_CSRF_TOKEN` | *(none)* | Same as above |
+| `REPORTS_CONFIG` | *(unset — `reports.yaml` at the project root)* | Explicit path to the report definitions file. See [docs/reports.md](reports.md). |
+
+### Per-report run defaults
+
+Each report in `reports.yaml` can have its default week count and campaign theme overridden by
+environment variables derived from its `id` (uppercased, hyphens → underscores):
+
+```
+RUTAS_DEFAULT_WEEKS=5
+RUTAS_DEFAULT_THEME=
+ESCUELA_DEFAULT_WEEKS=5
+ESCUELA_B_DEFAULT_WEEKS=5
+```
+
+These are what the web UI's Settings panel writes. See
+[docs/reports.md](reports.md#run-defaults) for the precedence rules.
 
 ### Examples
 

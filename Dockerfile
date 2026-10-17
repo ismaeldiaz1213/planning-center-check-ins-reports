@@ -1,4 +1,4 @@
-# Cloud Run job image — runs main.py (Rutas or Escuela Dominical pipeline).
+# Cloud Run job image — runs main.py for one configured report.
 # The web API server (api.py) and the React frontend are deployed separately
 # and are NOT included in this image.
 FROM python:3.11-slim
@@ -12,6 +12,11 @@ COPY backend/main.py .
 COPY backend/planning_center_reports/ planning_center_reports/
 COPY backend/logo.png .
 COPY backend/assets/ assets/
+
+# Report definitions. The glob makes this optional: with no reports.yaml the app
+# falls back to its built-in Rutas + Escuela Dominical defaults. It lands in /app,
+# which is the "backend/" location the loader checks.
+COPY reports.yaml* ./
 
 # credentials.json must be supplied at runtime via a mounted secret or volume.
 # Cloud Run: mount via Secret Manager to a path outside /app — a secret volume replaces

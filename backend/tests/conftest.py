@@ -1,4 +1,19 @@
+import os
+from pathlib import Path
+
 import pytest
+
+from planning_center_reports import reports as _reports
+
+# Pin the report registry to the shipped example config for the whole session.
+# Without this the suite would assert against whatever reports.yaml the operator
+# happens to have edited locally.
+_EXAMPLE_CONFIG = Path(__file__).resolve().parents[2] / "reports.yaml.example"
+
+
+def pytest_configure(config):
+    os.environ["REPORTS_CONFIG"] = str(_EXAMPLE_CONFIG)
+    _reports.load_reports(refresh=True)
 
 
 @pytest.fixture(autouse=True)
