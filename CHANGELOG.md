@@ -12,6 +12,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [v0.2.0] — 2026-10-17
+
 ### Added
 
 - **Richer `Roster.pdf`**, same plain layout — attendance dots instead of `3/5`; a **date
@@ -35,8 +39,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`main.py --all`** — every report in one process with shared PCO data; `manage.sh` now
   deploys a single scheduled `roster-weekly` job (per-report jobs stay for one-off runs), and
   option 25 switches the active gcloud project.
-
-
 - **`backend/backfill_bus_class.py`** (`make backfill-bus-class`) — seeds the `"C" Escuela
   Dominical` classes by checking every bus rider (grade 7–12, under 20) who also attends the
   regular Escuela Dominical into their class for the most recent Sunday, so Check-Ins pre-select suggests it. Class comes from People grade +
@@ -49,15 +51,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   defaults reproduce the previous `Rutas` + `Escuela Dominical` behaviour exactly, so existing
   installs need no changes. Full schema in **[docs/reports.md](docs/reports.md)**.
   - Required: `id`, `label`, `pco_event`.
-  - Optional: `subtitle`, `icon`, `enabled`, `outputs` (`simple` / `address`),
-    `route_source_event`, `show_route`, `helpers_event`, `helper_min_age`,
-    `attendance_summary`, `drive_folder_prefix`, `default_weeks`, `default_theme`,
+  - Optional: `subtitle`, `icon`, `enabled`, `outputs`, `start_date`, `history_weeks`,
+    `default_weeks`, `max_history_weeks`, `route_source_event`, `show_route`,
+    `attendance_summary`, `instructions`, `volunteer_report`, `volunteer_event`,
+    `volunteer_min_age`, `volunteer_weeks`, `drive_folder_prefix`, `default_theme`,
     `demo_locations`.
   - `REPORTS_CONFIG` overrides the config file path. Validation is strict: unknown keys,
     duplicate ids, unknown output kinds or themes, and `show_route` without a
     `route_source_event` all fail on load with the offending report named.
 - **`"B" Escuela Dominical` report** (`id: escuela-b`) — a second Sunday school session, with
-  the same bus-route column, helper filtering, and attendance summary tables as the first.
+  the same bus-route column and summary tables as the first.
   Its class folders are nested under a `drive_folder_prefix` so class names shared with the
   A session don't overwrite each other's `Roster.pdf` in Drive.
 - `backend/planning_center_reports/reports.py` — `ReportSpec` (a frozen dataclass, kept out of
@@ -65,8 +68,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `enabled_reports`, and `DEFAULT_REPORTS`.
 - `services.run_report(spec, ...)` — one pipeline replacing the near-duplicate `run_rutas` and
   `run_escuela_dominical`. Optional steps are genuinely skipped: a report with no
-  `helpers_event` never calls `get_helpers_set`, and one with no `route_source_event` never
-  builds a route map. A report whose PCO event does not exist yet (or has no check-ins yet)
+  `volunteer_event` never fetches it, and one with no `route_source_event` never builds a
+  route map. A report whose PCO event does not exist yet (or has no check-ins yet)
   logs a warning and exits cleanly instead of raising.
 - `manage.sh` option **10, Sync Cloud Run jobs with reports.yaml** — creates the Cloud Run job
   and Monday schedule for any configured report that lacks one, and detects `roster-*` jobs that
@@ -89,7 +92,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   lookup by id and by PCO event name) and `backend/tests/test_run_report.py` (asserts the
   optional PCO calls are skipped when unconfigured, and that `drive_folder_prefix` nests both
   the Drive folders and the `--dry-run` output).
-
 - `backend/promote_checkins.py` — moves a Sunday school class up a grade in Check-Ins
   pre-select history ahead of grade-promotion weekend: finds everyone checked into
   `--from-location` in the last `--weeks` Sundays (default 2) and, skipping anyone at or
@@ -106,6 +108,86 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (`age_from_birthday` also replaces a private copy that lived inside `get_helpers_set`).
 - `make promote-checkin-locations` and `make promote-checkin FROM=... TO=...` — Makefile
   wrappers around `promote_checkins.py` so each class can be run and verified one at a time.
+
+### Fixed
+
+- `get_event_id` in `pco_client.py` only read the first page (25) of Check-Ins events, so
+  newer events such as `"C" Escuela Dominical` were reported as "not found". It now follows
+  pagination.
+- `get_recent_event_periods` in `pco_client.py` ordered and limited event periods by
+  `-created_at`, not `-starts_at`. PCO can create recurring event periods ahead of
+  schedule, so "most recently created" is not reliably "most recent Sunday" — it could
+  even return a future period. Symptom: `promote_checkins.py` was checking people into
+  the wrong Sunday. Now orders by `-starts_at` and explicitly filters out any period
+  whose `starts_at` is in the future. This is shared code, so it also firms up the
+  weekly roster reports (`run_rutas` / `run_escuela_dominical`), which use the same
+  function and could theoretically have picked up a pre-created future period the same
+  way.
+- `roster-rutas` and `roster-escuela-dominical` Cloud Run jobs failing with
+  `FileNotFoundError: /app/credentials.json` on every run since the `Security` cleanup below
+  removed `COPY credentials.json` from the Docker images. That change (correctly) stopped
+  baking the service-account key into images, but `setup_gcloud.sh` and `manage.sh` were never
+  updated to actually mount it from Secret Manager — `SECRET_ENV` only carried `PCO_APP_ID`,
+  `PCO_SECRET`, and `GOOGLE_DRIVE_PARENT_FOLDER_ID`, so no `credentials.json` was ever present
+  in the running container. `setup_gcloud.sh` now stores `credentials.json` as the
+  `google-service-account-key` Secret Manager secret, and both scripts mount it via
+  `--set-secrets=/secrets/credentials.json=google-service-account-key:latest` plus
+  `--set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/secrets/credentials.json`. The mount path is
+  `/secrets/credentials.json`, not `/app/credentials.json` as `SECURITY.md` and
+  `docs/deployment-gcp.md` previously (incorrectly) documented — a Cloud Run secret volume
+  replaces the *entire* last directory of its mount path, so mounting into `/app` would have
+  hidden `main.py` and `planning_center_reports/` alongside the ones already COPYed into the
+  image. `drive_client.py` now resolves the key path from `GOOGLE_APPLICATION_CREDENTIALS` when
+  set, falling back to the local-dev path otherwise. `manage.sh` option 5 (Update
+  credentials.json) now uploads the new key to Secret Manager instead of rebuilding an image
+  that never contained it, and `deploy_api_service` checks that the secret exists in Secret
+  Manager instead of requiring a local `credentials.json` file that Docker builds no longer use.
+
+### Changed
+
+- **No per-person API calls.** Contact details come from the person sideloaded on each
+  check-in, so a weekly run of all reports takes ~130 PCO requests and under a minute
+  (previously ~40 minutes of job time across four jobs).
+- Every PCO request is paced under the 100-per-20-seconds limit and honours `Retry-After`.
+- Workers are whoever PCO tags as *Volunteer*; `helpers_event` / `helper_min_age` are removed.
+- CI: ruff is pinned (`ruff==0.17.1`) with an explicit rule set, so a ruff release can't
+  break the build.
+- `POST /api/jobs/rutas/run` and `/api/jobs/escuela/run` are now the generic
+  `POST /api/jobs/{report_id}/run`. Because the report ids are `rutas` and `escuela`, the
+  existing URLs are unchanged.
+- `GET/PUT /api/settings` replaces the fixed `rutas_weeks`/`rutas_theme`/`escuela_weeks`/
+  `escuela_theme` fields with a `reports` map keyed by report id. The underlying env vars are
+  derived from the id (`RUTAS_DEFAULT_WEEKS`, `ESCUELA_B_DEFAULT_WEEKS`, …), so the two
+  pre-existing variable names still work and no `.env` migration is needed.
+- The CLI's positional argument accepts a report id (`escuela-b`) as well as the PCO event name
+  (`"Escuela Dominical"`), so existing Cloud Run job arguments keep working. `--weeks` and
+  `--theme` now default to the report's configured values rather than a fixed 5/none.
+- `manage.sh` — options that were per-event now prompt for a report from `reports.yaml`, and the
+  deploy, recreate, status, theme, and scheduler pause/resume loops iterate over the configured
+  reports. The menu is renumbered as a result: sync jobs is a new **10**, job status **11**,
+  scheduler **12–14**, API service **15–18**, local testing **19–21**, demo **22–24**.
+  Options 1–9 are unchanged. Docs updated to match.
+- `drive_client` escapes folder and file names in Drive queries, since names now come from
+  config and can contain quotes (e.g. `"B" Escuela Dominical`).
+- Both Dockerfiles copy `reports.yaml` into the image (via a glob, so it stays optional).
+- `pyyaml` added to `backend/requirements.txt`.
+
+### Removed
+
+- `Direcciones-Roster.pdf` (the `address` output) — unused.
+
+### Kept for compatibility
+
+- `python main.py "Escuela Dominical"` and the other PCO-event-name arguments still resolve to
+  their report. (The `services.run_rutas()` / `run_escuela_dominical()` wrappers had no
+  remaining callers and were removed.)
+
+---
+
+## [v0.1.0] — 2026-07-12
+
+### Added
+
 - `DEMO_MODE` environment variable — set to `true` to run the web UI as a public demo. Auth is
   bypassed (no Google login required), job runs use mock data via `demo_run.py` (no Planning
   Center or Drive credentials needed), and settings saves are accepted but not persisted. Deploy
@@ -164,74 +246,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `DEVELOPMENT.md` local testing section — three-tier table explaining mock preview,
   dry-run, and production modes.
 
-### Fixed
-
-- `get_event_id` in `pco_client.py` only read the first page (25) of Check-Ins events, so
-  newer events such as `"C" Escuela Dominical` were reported as "not found". It now follows
-  pagination.
-- `get_recent_event_periods` in `pco_client.py` ordered and limited event periods by
-  `-created_at`, not `-starts_at`. PCO can create recurring event periods ahead of
-  schedule, so "most recently created" is not reliably "most recent Sunday" — it could
-  even return a future period. Symptom: `promote_checkins.py` was checking people into
-  the wrong Sunday. Now orders by `-starts_at` and explicitly filters out any period
-  whose `starts_at` is in the future. This is shared code, so it also firms up the
-  weekly roster reports (`run_rutas` / `run_escuela_dominical`), which use the same
-  function and could theoretically have picked up a pre-created future period the same
-  way.
-- `roster-rutas` and `roster-escuela-dominical` Cloud Run jobs failing with
-  `FileNotFoundError: /app/credentials.json` on every run since the `Security` cleanup below
-  removed `COPY credentials.json` from the Docker images. That change (correctly) stopped
-  baking the service-account key into images, but `setup_gcloud.sh` and `manage.sh` were never
-  updated to actually mount it from Secret Manager — `SECRET_ENV` only carried `PCO_APP_ID`,
-  `PCO_SECRET`, and `GOOGLE_DRIVE_PARENT_FOLDER_ID`, so no `credentials.json` was ever present
-  in the running container. `setup_gcloud.sh` now stores `credentials.json` as the
-  `google-service-account-key` Secret Manager secret, and both scripts mount it via
-  `--set-secrets=/secrets/credentials.json=google-service-account-key:latest` plus
-  `--set-env-vars=GOOGLE_APPLICATION_CREDENTIALS=/secrets/credentials.json`. The mount path is
-  `/secrets/credentials.json`, not `/app/credentials.json` as `SECURITY.md` and
-  `docs/deployment-gcp.md` previously (incorrectly) documented — a Cloud Run secret volume
-  replaces the *entire* last directory of its mount path, so mounting into `/app` would have
-  hidden `main.py` and `planning_center_reports/` alongside the ones already COPYed into the
-  image. `drive_client.py` now resolves the key path from `GOOGLE_APPLICATION_CREDENTIALS` when
-  set, falling back to the local-dev path otherwise. `manage.sh` option 5 (Update
-  credentials.json) now uploads the new key to Secret Manager instead of rebuilding an image
-  that never contained it, and `deploy_api_service` checks that the secret exists in Secret
-  Manager instead of requiring a local `credentials.json` file that Docker builds no longer use.
-
-
 ### Changed
-
-- **No per-person API calls.** Contact details come from the person sideloaded on each
-  check-in, so a weekly run of all reports takes ~130 PCO requests and under a minute
-  (previously ~40 minutes of job time across four jobs).
-- Every PCO request is paced under the 100-per-20-seconds limit and honours `Retry-After`.
-- Workers are whoever PCO tags as *Volunteer*; `helpers_event` / `helper_min_age` are removed.
-- CI: ruff is pinned (`ruff==0.17.1`) with an explicit rule set, so a ruff release can't
-  break the build.
-- `POST /api/jobs/rutas/run` and `/api/jobs/escuela/run` are now the generic
-  `POST /api/jobs/{report_id}/run`. Because the report ids are `rutas` and `escuela`, the
-  existing URLs are unchanged.
-- `GET/PUT /api/settings` replaces the fixed `rutas_weeks`/`rutas_theme`/`escuela_weeks`/
-  `escuela_theme` fields with a `reports` map keyed by report id. The underlying env vars are
-  derived from the id (`RUTAS_DEFAULT_WEEKS`, `ESCUELA_B_DEFAULT_WEEKS`, …), so the two
-  pre-existing variable names still work and no `.env` migration is needed.
-- The CLI's positional argument accepts a report id (`escuela-b`) as well as the PCO event name
-  (`"Escuela Dominical"`), so existing Cloud Run job arguments keep working. `--weeks` and
-  `--theme` now default to the report's configured values rather than a fixed 5/none.
-- `pco_client.get_helpers_set(event_name, weeks, min_age)` takes the helpers event as its first
-  argument instead of hardcoding `"Junta de Rutas Attendance"`, and `_helpers_cache` is keyed by
-  `(event_name, weeks, min_age)` — previously a single flat set, which would have returned the
-  wrong helpers once two reports used different helper events in one process.
-- `services._get_route_mapping(event_name, weeks)` likewise takes the route event as an argument.
-- `manage.sh` — options that were per-event now prompt for a report from `reports.yaml`, and the
-  deploy, recreate, status, theme, and scheduler pause/resume loops iterate over the configured
-  reports. The menu is renumbered as a result: sync jobs is a new **10**, job status **11**,
-  scheduler **12–14**, API service **15–18**, local testing **19–21**, demo **22–24**.
-  Options 1–9 are unchanged. Docs updated to match.
-- `drive_client` escapes folder and file names in Drive queries, since names now come from
-  config and can contain quotes (e.g. `"B" Escuela Dominical`).
-- Both Dockerfiles copy `reports.yaml` into the image (via a glob, so it stays optional).
-- `pyyaml` added to `backend/requirements.txt`.
 
 - `App.tsx`: `authRequired` now accounts for `demoMode` — when `DEMO_MODE=true`, the login
   overlay is suppressed even if `GOOGLE_CLIENT_ID` is set, so a demo deployment can set both
@@ -269,16 +284,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a Drive upload or local copy fails mid-loop.
 - `run_rutas` / `run_escuela_dominical` log now shows only the locations that will actually be
   processed (filtered set) rather than every location that appeared in the API sideload.
-
-### Removed
-
-- `Direcciones-Roster.pdf` (the `address` output) — unused.
-
-### Kept for compatibility
-
-- `python main.py "Escuela Dominical"` and the other PCO-event-name arguments still resolve to
-  their report. (The `services.run_rutas()` / `run_escuela_dominical()` wrappers had no
-  remaining callers and were removed.)
 
 ### Security
 
