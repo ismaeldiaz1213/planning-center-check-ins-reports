@@ -10,6 +10,7 @@
 #   python preview.py --theme primavera  # one specific theme
 #   python preview.py --type roster      # only the simple roster PDF
 #   python preview.py --type direcciones # only the address-grouped PDF
+#   python preview.py --report escuela-b # exactly what one configured report emits
 #   python preview.py --open             # open PDFs in your viewer after generating
 #
 # Output folder: ./previews/
@@ -22,6 +23,7 @@ import planning_center_reports.config as config
 from planning_center_reports.config import RUTAS_SUBTITLE
 from planning_center_reports.mock_data import MOCK_ATTENDEES, MOCK_SUNDAY_DATA
 from planning_center_reports.pdf.rosters import generate_address_pdf, generate_simple_roster_pdf
+from planning_center_reports.reports import OUTPUT_FILENAMES, ReportConfigError, get_report
 
 THEMES_AVAILABLE = [None, "primavera", "verano", "otono", "invierno"]
 THEME_LABELS = {
@@ -50,6 +52,12 @@ def main():
              "'direcciones'=address-grouped, 'both'=roster+direcciones, 'all'=all three",
     )
     parser.add_argument(
+        "--report",
+        default=None,
+        help="Preview exactly what one configured report emits (by id or PCO event name). "
+             "Overrides --type. e.g. --report escuela-b",
+    )
+    parser.add_argument(
         "--open",
         action="store_true",
         help="Open generated PDFs in your default viewer after generating",
@@ -65,6 +73,13 @@ def main():
         else THEMES_AVAILABLE
     )
 
+    spec = None
+    if args.report:
+        try:
+            spec = get_report(args.report)
+        except ReportConfigError as exc:
+            parser.error(str(exc))
+
     generated = []
 
     for theme_key in themes_to_run:
@@ -74,6 +89,24 @@ def main():
         slug  = theme_key or "default"
         label = THEME_LABELS[theme_key]
         print(f"\n── {label} ──")
+
+        if args.report:
+            # Mirror the real pipeline: same outputs, subtitle, and optional
+            # features as the configured report, driven by mock data.
+            for kind in spec.outputs:
+                path = os.path.join(out_dir, f"{slug}_{spec.id}_{OUTPUT_FILENAMES[kind]}")
+                location = spec.demo_locations[0] if spec.demo_locations else spec.label
+                if kind == "address":
+                    generate_address_pdf(location, MOCK_ATTENDEES, path)
+                else:
+                    generate_simple_roster_pdf(
+                        location, spec.pdf_subtitle, MOCK_ATTENDEES, path,
+                        show_route=spec.show_route,
+                        sunday_data=MOCK_SUNDAY_DATA if spec.attendance_summary else None,
+                    )
+                print(f"  ✓ {os.path.basename(path)}")
+                generated.append(path)
+            continue
 
         if args.type in ("roster", "both", "all"):
             path = os.path.join(out_dir, f"{slug}_Roster.pdf")

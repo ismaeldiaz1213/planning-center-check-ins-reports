@@ -213,7 +213,7 @@ class TestRunRutas:
         monkeypatch.delenv("RUTAS_DEFAULT_THEME", raising=False)
         client.post("/api/jobs/rutas/run")
         cmd = mock_run.call_args[0][1]
-        assert "Rutas" in cmd
+        assert "rutas" in cmd          # report id, resolved back to the PCO event by cli.py
         assert "--weeks" in cmd
         assert "5" in cmd  # default weeks
 
@@ -262,12 +262,12 @@ class TestRunEscuela:
         assert "job_id" in resp.json()
 
     @patch("api._run_subprocess")
-    def test_command_includes_escuela_dominical(self, mock_run, monkeypatch):
+    def test_command_includes_report_id(self, mock_run, monkeypatch):
         monkeypatch.delenv("ESCUELA_DEFAULT_WEEKS", raising=False)
         monkeypatch.delenv("ESCUELA_DEFAULT_THEME", raising=False)
         client.post("/api/jobs/escuela/run")
         cmd = mock_run.call_args[0][1]
-        assert "Escuela Dominical" in cmd
+        assert "escuela" in cmd
 
     @patch("api._run_subprocess")
     def test_command_uses_env_default_weeks(self, mock_run, monkeypatch):
@@ -315,17 +315,29 @@ class TestGetSettings:
         monkeypatch.delenv("RUTAS_DEFAULT_WEEKS", raising=False)
         monkeypatch.delenv("ESCUELA_DEFAULT_WEEKS", raising=False)
         resp = client.get("/api/settings")
-        data = resp.json()
-        assert data["rutas_weeks"] == 5
-        assert data["escuela_weeks"] == 5
+        reports = resp.json()["reports"]
+        assert reports["rutas"]["weeks"] == 5
+        assert reports["escuela"]["weeks"] == 5
 
     def test_reads_custom_weeks_from_env(self, monkeypatch):
         monkeypatch.setenv("RUTAS_DEFAULT_WEEKS", "7")
         monkeypatch.setenv("ESCUELA_DEFAULT_WEEKS", "3")
         resp = client.get("/api/settings")
-        data = resp.json()
-        assert data["rutas_weeks"] == 7
-        assert data["escuela_weeks"] == 3
+        reports = resp.json()["reports"]
+        assert reports["rutas"]["weeks"] == 7
+        assert reports["escuela"]["weeks"] == 3
+
+    def test_includes_every_configured_report(self, monkeypatch):
+        resp = client.get("/api/settings")
+        reports = resp.json()["reports"]
+        assert set(reports) == {"rutas", "escuela", "escuela-b"}
+        assert reports["escuela-b"]["label"] == '"B" Escuela Dominical'
+
+    def test_reads_hyphenated_report_id_from_env(self, monkeypatch):
+        """A hyphenated id maps to an underscored env prefix."""
+        monkeypatch.setenv("ESCUELA_B_DEFAULT_WEEKS", "9")
+        resp = client.get("/api/settings")
+        assert resp.json()["reports"]["escuela-b"]["weeks"] == 9
 
 
 # ── /api/settings PUT ─────────────────────────────────────────────────────────
@@ -356,23 +368,35 @@ class TestUpdateSettings:
         assert updates["GOOGLE_DRIVE_PARENT_FOLDER_ID"] == "new-folder"
 
     @patch("api._write_dotenv")
-    def test_maps_rutas_weeks(self, mock_write):
-        client.put("/api/settings", json={"rutas_weeks": 10})
+    def test_maps_report_weeks(self, mock_write):
+        client.put("/api/settings", json={"reports": {"rutas": {"weeks": 10}}})
         updates = mock_write.call_args[0][0]
         assert updates["RUTAS_DEFAULT_WEEKS"] == "10"
 
     @patch("api._write_dotenv")
+    def test_maps_hyphenated_report_id_to_env_prefix(self, mock_write):
+        client.put("/api/settings", json={"reports": {"escuela-b": {"weeks": 6}}})
+        updates = mock_write.call_args[0][0]
+        assert updates["ESCUELA_B_DEFAULT_WEEKS"] == "6"
+
+    @patch("api._write_dotenv")
     def test_rejects_invalid_theme(self, mock_write):
-        client.put("/api/settings", json={"rutas_theme": "invalid-theme"})
+        client.put("/api/settings", json={"reports": {"rutas": {"theme": "invalid-theme"}}})
         updates = mock_write.call_args[0][0]
         assert updates["RUTAS_DEFAULT_THEME"] == ""
 
     @patch("api._write_dotenv")
     def test_accepts_valid_theme(self, mock_write):
         for theme in ("primavera", "verano", "otono", "invierno"):
-            client.put("/api/settings", json={"rutas_theme": theme})
+            client.put("/api/settings", json={"reports": {"rutas": {"theme": theme}}})
             updates = mock_write.call_args[0][0]
             assert updates["RUTAS_DEFAULT_THEME"] == theme
+
+    @patch("api._write_dotenv")
+    def test_unknown_report_id_is_404(self, mock_write):
+        resp = client.put("/api/settings", json={"reports": {"nope": {"weeks": 4}}})
+        assert resp.status_code == 404
+        mock_write.assert_not_called()
 
     @patch("api._write_dotenv")
     def test_empty_body_does_not_call_write(self, mock_write):
@@ -574,7 +598,7 @@ class TestDemoMode:
         client.post("/api/jobs/rutas/run")
         cmd = mock_run.call_args[0][1]
         assert "demo_run.py" in cmd
-        assert "Rutas" in cmd
+        assert "rutas" in cmd
         assert "--weeks" not in cmd
 
     @patch("api._run_subprocess")
@@ -583,7 +607,7 @@ class TestDemoMode:
         client.post("/api/jobs/escuela/run")
         cmd = mock_run.call_args[0][1]
         assert "demo_run.py" in cmd
-        assert "Escuela Dominical" in cmd
+        assert "escuela" in cmd
 
     @patch("api._write_dotenv")
     def test_settings_write_is_noop_in_demo_mode(self, mock_write, monkeypatch):

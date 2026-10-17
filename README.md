@@ -10,7 +10,7 @@ Automatically generates PDF rosters from [Planning Center](https://www.planningc
 
 > **[→ Open the live demo](https://roster-api-demo-k3lvrupgua-uc.a.run.app/)** — no login, no credentials, no download required.
 
-The demo runs the full web UI against mock data: trigger a Rutas or Escuela Dominical job, watch the log output stream in real time, and preview the generated PDFs. It's the real application — just with fake attendees instead of your church data.
+The demo runs the full web UI against mock data: trigger any configured roster job, watch the log output stream in real time, and preview the generated PDFs. It's the real application — just with fake attendees instead of your church data.
 
 
 ---
@@ -26,6 +26,9 @@ cd planning-center-check-ins-reports
 cp .env.example .env
 # Open .env and fill in PCO_APP_ID, PCO_SECRET, GOOGLE_DRIVE_PARENT_FOLDER_ID
 
+# 2b. (Optional) Define your reports — defaults to Rutas + Escuela Dominical
+cp reports.yaml.example reports.yaml
+
 # 3. Install backend dependencies
 cd backend
 python -m venv .venv && source .venv/bin/activate
@@ -37,16 +40,19 @@ pytest && ruff check .
 # 5. Generate sample PDFs (no credentials needed)
 python preview.py --open
 
-# 6. Run against your Planning Center account
-python main.py "Your Event Name"
+# 6. See what reports are configured, then run one
+python main.py --list-reports
+python main.py rutas
 ```
 
-See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough.
+See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough, and
+[docs/reports.md](docs/reports.md) for how to configure which reports get generated.
 
 ---
 
 ## Features
 
+- **Configurable reports** — define any number of Check-Ins events in `reports.yaml`; bus routes, helper detection, and attendance summaries are optional per report, so a church without a bus ministry never sees a `Ruta` column
 - **Two roster types per bus route** — address-grouped PDF for secretaries, clean alphabetical list for drivers
 - **Sunday school rosters** — one per class with grade, attendance rate, and bus route column
 - **Attendance summary tables** — per-Sunday regular/visitor counts and per-route headcount
@@ -105,10 +111,10 @@ Each class location receives:
 Pass `--theme` to apply a seasonal colour scheme:
 
 ```bash
-python main.py "Rutas" --theme primavera
-python main.py "Rutas" --theme verano
-python main.py "Rutas" --theme otono
-python main.py "Rutas" --theme invierno
+python main.py rutas --theme primavera
+python main.py rutas --theme verano
+python main.py rutas --theme otono
+python main.py rutas --theme invierno
 ```
 
 | Theme | Colours | Label | Visitor marker |
@@ -124,6 +130,7 @@ python main.py "Rutas" --theme invierno
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) — clone, configure, run tests, generate PDFs
+- [Report Configuration](docs/reports.md) — `reports.yaml`: defining reports and their optional features
 - [Configuration Reference](docs/configuration.md) — all environment variables, PCO permissions, Drive setup, logo
 - [Deploying to Google Cloud](docs/deployment-gcp.md) — Cloud Run jobs, manage.sh, web UI deploy
 - [Grade Promotion](docs/grade-promotion.md) — moving a class up a grade in Check-Ins pre-select history
@@ -144,7 +151,7 @@ see [DEVELOPMENT.md](DEVELOPMENT.md).
 | `No such file: main.py` in Cloud | Job is using a stale image. Run `manage.sh → option 6`. |
 | `FileNotFoundError: credentials.json` in Cloud | Run **both** `manage.sh → option 5` (uploads the key to Secret Manager and points the job's `--set-secrets` at it) **and** `option 6` (rebuilds the image so the code that reads `GOOGLE_APPLICATION_CREDENTIALS` is actually deployed). Option 5 alone updates config only — it doesn't rebuild the image. |
 | PDFs not appearing in Drive | Confirm service account has Editor access to the Drive folder. |
-| Job timed out | Both jobs have a 3600s (1 hour) limit. Should be sufficient for any church size. |
+| Job timed out | Each report's job has a 3600s (1 hour) limit. Should be sufficient for any church size. |
 | Theme not applying | Run both build + job update, or use `manage.sh → option 6` which does both. |
 | `unrecognized arguments: --theme primavera` | `--args` requires comma-separated tokens, not spaces: `--theme,primavera`. |
 | `promote_checkins.py` checks people into the wrong Sunday/time | Confirm `--weeks`/`--time` match what you expect, and run `--list-locations` to rule out a typo'd class name silently matching nothing (it raises instead, but double-check `--from-location`/`--to-location` spelling). |

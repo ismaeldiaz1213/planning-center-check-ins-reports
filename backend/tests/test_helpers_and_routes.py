@@ -203,7 +203,7 @@ class TestGetRouteMapping:
         ]
         mock_get_checkins.return_value = (checkins, included)
 
-        route_map = _get_route_mapping(weeks=5)
+        route_map = _get_route_mapping("Rutas", weeks=5)
 
         assert route_map["p1"] == "Ruta 1 - Bus"
         assert route_map["p2"] == "Ruta 2 - Van"
@@ -229,7 +229,7 @@ class TestGetRouteMapping:
         included = [_make_location_included("loc1", "Ruta 1 - Bus")]
         mock_get_checkins.return_value = (checkins, included)
 
-        route_map = _get_route_mapping(weeks=5)
+        route_map = _get_route_mapping("Rutas", weeks=5)
 
         assert len(route_map) == 1
         assert route_map["p1"] == "Ruta 1 - Bus"
@@ -239,7 +239,7 @@ class TestGetRouteMapping:
         """_get_route_mapping should gracefully handle missing Rutas event."""
         mock_get_event_id.side_effect = Exception("Event not found")
 
-        route_map = _get_route_mapping(weeks=5)
+        route_map = _get_route_mapping("Rutas", weeks=5)
 
         assert route_map == {}
 

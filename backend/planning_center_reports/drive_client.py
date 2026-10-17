@@ -45,11 +45,20 @@ def get_drive_service():
     return build("drive", "v3", credentials=credentials)
 
 
+def _escape(value: str) -> str:
+    """Escape a value for use inside a single-quoted Drive query literal.
+
+    Folder names come from PCO location names and reports.yaml, so they can
+    legitimately contain quotes (e.g. '"B" Escuela Dominical').
+    """
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 def get_or_create_folder(service, parent_id: str, folder_name: str) -> str:
     """Return the Drive folder ID for `folder_name` under `parent_id`, creating
     it if it does not already exist."""
     query = (
-        f"name='{folder_name}' and "
+        f"name='{_escape(folder_name)}' and "
         f"mimeType='application/vnd.google-apps.folder' and "
         f"'{parent_id}' in parents and trashed=false"
     )
@@ -76,7 +85,7 @@ def upload_and_replace(service, folder_id: str, local_path: str, drive_name: str
     If `drive_name` is omitted the local filename is used.
     """
     drive_name = drive_name or os.path.basename(local_path)
-    query      = f"name='{drive_name}' and '{folder_id}' in parents and trashed=false"
+    query      = f"name='{_escape(drive_name)}' and '{folder_id}' in parents and trashed=false"
     results    = service.files().list(
         q=query, supportsAllDrives=True, includeItemsFromAllDrives=True
     ).execute()

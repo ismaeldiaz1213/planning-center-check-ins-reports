@@ -6,7 +6,7 @@
 #   get_recent_event_periods   — fetch the N most recent Sunday periods
 #   get_checkins_for_event_periods — paginate through all check-ins for those periods
 #   get_person_details         — fetch phone, address, birthday, grade for one person
-#   get_helpers_set            — return set of person_ids (age 16+) from Junta de Rutas
+#   get_helpers_set            — return set of person_ids old enough to count as helpers
 #   get_location_id            — resolve a Check-Ins location name to its PCO ID
 #   get_event_times            — list an event period's service times (hour/minute/name)
 #   age_from_birthday          — compute age in years from an ISO-8601 birthday string
@@ -39,10 +39,11 @@ class PaginationCircuitBreakerError(Exception):
 # a person who appears on multiple bus routes is only fetched once.
 _person_cache: dict = {}
 
-# Module-level cache: person_id → bool indicating if they are a helper.
-# Populated by get_helpers_set() and reused across both Rutas and Escuela Dominical
-# so we only fetch the helpers event once.
-_helpers_cache: set = set()
+# Module-level cache: (event_name, weeks, min_age) → set of helper person_ids.
+# Populated by get_helpers_set() and reused across reports in the same run so a
+# shared helpers event is only fetched once. Keyed rather than flat because two
+# reports may point at different helper events (or different age thresholds).
+_helpers_cache: dict[tuple[str, int, int], set] = {}
 
 # PCO integer → display-string mapping for the grade field on People records.
 GRADE_MAP = {
@@ -71,13 +72,20 @@ def get_event_id(event_name: str) -> str:
     """Return the PCO event ID for a named event.
 
     Raises an exception if the event name is not found — it is case-sensitive.
+    Follows pagination: PCO returns 25 events per page by default, and archived
+    events stay in the list, so newer events can sit past the first page.
     """
-    url      = f"{BASE_URL}/check-ins/v2/events"
-    response = requests.get(url, auth=_auth)
-    response.raise_for_status()
-    for event in response.json()["data"]:
-        if event["attributes"]["name"] == event_name:
-            return event["id"]
+    url    = f"{BASE_URL}/check-ins/v2/events"
+    params = {"per_page": 100}
+    while url:
+        response = requests.get(url, auth=_auth, params=params)
+        response.raise_for_status()
+        body = response.json()
+        for event in body["data"]:
+            if event["attributes"]["name"] == event_name:
+                return event["id"]
+        url    = body.get("links", {}).get("next")
+        params = None  # the "next" link already carries per_page/offset
     raise Exception(f"Event '{event_name}' not found")
 
 
@@ -298,6 +306,8 @@ def get_person_details(person_id: str) -> dict:
         "address":    primary_address,
         "birthday":   person_attrs.get("birthdate") or "",
         "grade":      grade,
+        "grade_num":  grade_raw,                         # raw PCO integer, or None
+        "gender":     person_attrs.get("gender") or "",  # "Male" / "Female" / ""
         "created_at": person_attrs.get("created_at") or "",
     }
     _person_cache[person_id] = result
@@ -352,27 +362,33 @@ def get_event_times(event_id: str, event_period_id: str) -> list:
     return times
 
 
-def get_helpers_set(weeks: int = 5) -> set:
-    """Return the set of person_ids (age 16+) who checked into the
-    'Junta de Rutas Attendance' event in the last `weeks` weeks.
+def get_helpers_set(event_name: str, weeks: int = 5, min_age: int = 16) -> set:
+    """Return the set of person_ids aged `min_age`+ who checked into `event_name`
+    in the last `weeks` weeks.
 
-    Results are cached in _helpers_cache so multiple calls within a run
-    only fetch the event once.
+    `event_name` is the PCO Check-Ins event that identifies helpers/workers —
+    "Junta de Rutas Attendance" for the bus ministry. Reports that have no such
+    event should skip this call entirely rather than pass a name.
+
+    Results are cached per (event_name, weeks, min_age) so multiple reports in
+    one run only fetch a shared helpers event once. A missing event is not fatal:
+    it logs a warning and returns an empty set.
     """
-    if _helpers_cache:
-        return _helpers_cache
+    cache_key = (event_name, weeks, min_age)
+    if cache_key in _helpers_cache:
+        return _helpers_cache[cache_key]
 
-    print("  Fetching helpers (Junta de Rutas Attendance)...", flush=True)
+    print(f"  Fetching helpers ({event_name})...", flush=True)
     try:
-        event_id = get_event_id("Junta de Rutas Attendance")
+        event_id = get_event_id(event_name)
     except Exception as e:
-        print(f"  ⚠ Could not find 'Junta de Rutas Attendance' event: {e}", flush=True)
+        print(f"  \u26a0 Could not find {event_name!r} event: {e}", flush=True)
         return set()
 
     try:
         event_period_ids, _, _ = get_recent_event_periods(event_id, weeks=weeks)
     except Exception as e:
-        print(f"  ⚠ Could not fetch helpers event periods: {e}", flush=True)
+        print(f"  \u26a0 Could not fetch helpers event periods: {e}", flush=True)
         return set()
 
     try:
@@ -380,7 +396,7 @@ def get_helpers_set(weeks: int = 5) -> set:
     except PaginationCircuitBreakerError:
         raise
     except Exception as e:
-        print(f"  ⚠ Could not fetch helpers check-ins: {e}", flush=True)
+        print(f"  \u26a0 Could not fetch helpers check-ins: {e}", flush=True)
         return set()
 
     # Collect all unique person_ids from the helpers event
@@ -391,18 +407,18 @@ def get_helpers_set(weeks: int = 5) -> set:
         if person_id:
             candidates.add(person_id)
 
-    # Filter by age 16+ — fetch each candidate's birthday and check age
+    # Filter by age — fetch each candidate's birthday and check age
     helpers = set()
     for i, person_id in enumerate(candidates, 1):
         details = get_person_details(person_id)
         birthday = details.get("birthday", "")
         age = age_from_birthday(birthday)
-        if age >= 16:
+        if age >= min_age:
             helpers.add(person_id)
             print(f"    [{i}/{len(candidates)}] Helper: {person_id} (age {age})", flush=True)
         else:
             print(f"    [{i}/{len(candidates)}] Not helper: {person_id} (age {age})", flush=True)
 
-    _helpers_cache.update(helpers)
+    _helpers_cache[cache_key] = helpers
     print(f"  Found {len(helpers)} helpers.", flush=True)
-    return _helpers_cache
+    return helpers

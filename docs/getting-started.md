@@ -91,12 +91,12 @@ Before uploading anything to Drive, do a **dry run** from the project root to ve
 everything looks right. The easiest way is through `manage.sh`:
 
 ```bash
-./manage.sh → option 20   # build local Docker image (one-time)
-./manage.sh → option 21   # dry-run Rutas — all routes, no Drive upload
-./manage.sh → option 22   # dry-run Rutas — single route (prompts for name)
-./manage.sh → option 23   # dry-run Escuela Dominical — all classes
-./manage.sh → option 24   # dry-run Escuela Dominical — single class
+./manage.sh → option 19   # build local Docker image (one-time)
+./manage.sh → option 20   # dry-run a report — all locations, no Drive upload
+./manage.sh → option 21   # dry-run a report — single location (prompts for name)
 ```
+
+Options 20 and 21 list every report configured in `reports.yaml` and let you pick one.
 
 PDFs are saved to `./out/` and the folder opens automatically when done.
 Nothing is uploaded to Google Drive.
@@ -104,8 +104,7 @@ Nothing is uploaded to Google Drive.
 When you're happy with the output, run the real job:
 
 ```bash
-./manage.sh → option 8    # run Rutas (uploads to Drive)
-./manage.sh → option 9    # run Escuela Dominical (uploads to Drive)
+./manage.sh → option 8    # pick a report and run it (uploads to Drive)
 ```
 
 | Path | Data | Drive upload | Output |

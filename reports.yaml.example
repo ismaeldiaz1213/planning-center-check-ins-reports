@@ -1,0 +1,63 @@
+# reports.yaml — report definitions
+#
+# Each entry describes one Planning Center Check-Ins event and the roster PDFs
+# generated from it. Copy this file to `reports.yaml` and edit.
+#
+#   cp reports.yaml.example reports.yaml
+#
+# If no reports.yaml exists, the built-in defaults (Rutas + Escuela Dominical)
+# are used, so an existing install needs no changes.
+#
+# Every optional feature defaults to OFF. A church with no bus ministry simply
+# leaves `route_source_event` and `helpers_event` unset and those Planning
+# Center events are never contacted. Full schema: docs/reports.md
+#
+# Required : id, label, pco_event
+# Optional : subtitle, icon, enabled, outputs, helpers_event, helper_min_age,
+#            route_source_event, show_route, attendance_summary,
+#            drive_folder_prefix, default_weeks, default_theme, demo_locations
+
+reports:
+  # ── Bus routes ──────────────────────────────────────────────────────────────
+  - id: rutas
+    label: Rutas
+    pco_event: Rutas                            # exact PCO Check-Ins event name
+    icon: "🚌"
+    subtitle: Ministerio de Autobuses
+    outputs: [address, simple]                  # Direcciones-Roster.pdf + Roster.pdf
+    helpers_event: Junta de Rutas Attendance    # bus workers, age 16+
+    demo_locations: ["Ruta 1 - Bus", "Ruta 2 - Van", "Ruta 3 - Carro"]
+
+  # ── Sunday school ───────────────────────────────────────────────────────────
+  - id: escuela
+    label: Escuela Dominical
+    pco_event: Escuela Dominical
+    icon: "📚"
+    outputs: [simple]
+    helpers_event: Junta de Rutas Attendance
+    route_source_event: Rutas                   # where the "Ruta" column comes from
+    show_route: true
+    attendance_summary: true                    # per-Sunday + per-route tables
+    demo_locations: ["Clase Primaria", "Clase Secundaria"]
+
+  # ── Second Sunday school session ────────────────────────────────────────────
+  - id: escuela-b
+    label: '"B" Escuela Dominical'
+    pco_event: '"B" Escuela Dominical'
+    icon: "📗"
+    outputs: [simple]
+    helpers_event: Junta de Rutas Attendance
+    route_source_event: Rutas
+    show_route: true
+    attendance_summary: true
+    # Keeps B's class folders from colliding with A's in Google Drive.
+    drive_folder_prefix: '"B" Escuela Dominical'
+    demo_locations: ["Clase Primaria B", "Clase Secundaria B"]
+
+  # ── Example: a church with no bus ministry ──────────────────────────────────
+  # Nothing but the roster — no Ruta column, no helper lookup, no summary.
+  # - id: ninos
+  #   label: Clases de Niños
+  #   pco_event: Clases de Niños
+  #   icon: "🧒"
+  #   outputs: [simple]

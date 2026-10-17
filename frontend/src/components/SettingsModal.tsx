@@ -26,6 +26,12 @@ export default function SettingsModal({ onClose }: Props) {
   const set = <K extends keyof Settings>(key: K, val: Settings[K]) =>
     setForm(f => f ? { ...f, [key]: val } : f)
 
+  /** Update one field of one report's run defaults. */
+  const setReport = (id: string, patch: { weeks?: number; theme?: string }) =>
+    setForm(f => f
+      ? { ...f, reports: { ...f.reports, [id]: { ...f.reports[id], ...patch } } }
+      : f)
+
   const handleSave = async () => {
     if (!form) return
     setSaving(true)
@@ -36,10 +42,9 @@ export default function SettingsModal({ onClose }: Props) {
         pco_app_id:                    form.pco_app_id,
         pco_secret:                    form.pco_secret,
         google_drive_parent_folder_id: form.google_drive_parent_folder_id,
-        rutas_weeks:                   form.rutas_weeks,
-        rutas_theme:                   form.rutas_theme,
-        escuela_weeks:                 form.escuela_weeks,
-        escuela_theme:                 form.escuela_theme,
+        reports: Object.fromEntries(
+          Object.entries(form.reports).map(([id, r]) => [id, { weeks: r.weeks, theme: r.theme }])
+        ),
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -113,65 +118,45 @@ export default function SettingsModal({ onClose }: Props) {
                 </div>
               </section>
 
-              {/* Rutas defaults */}
-              <section className={sStyles.section}>
-                <h3 className={sStyles.sectionTitle}>{t('settings.section.rutas')}</h3>
-                <div className={sStyles.row}>
-                  <div className={sStyles.field}>
-                    <label className={sStyles.label}>{t('settings.weeks')}</label>
-                    <input
-                      className={`${sStyles.input} ${sStyles.narrow}`}
-                      type="number"
-                      min={1} max={52}
-                      value={form.rutas_weeks}
-                      onChange={e => set('rutas_weeks', Number(e.target.value))}
-                    />
+              {/* One run-defaults section per report configured in reports.yaml */}
+              {Object.entries(form.reports).map(([id, report]) => (
+                <section className={sStyles.section} key={id}>
+                  <h3 className={sStyles.sectionTitle}>
+                    {`${report.label} — ${t('settings.section.report')}`}
+                  </h3>
+                  <div className={sStyles.row}>
+                    <div className={sStyles.field}>
+                      <label className={sStyles.label} htmlFor={`weeks-${id}`}>
+                        {t('settings.weeks')}
+                      </label>
+                      <input
+                        id={`weeks-${id}`}
+                        className={`${sStyles.input} ${sStyles.narrow}`}
+                        type="number"
+                        min={1} max={52}
+                        value={report.weeks}
+                        onChange={e => setReport(id, { weeks: Number(e.target.value) })}
+                      />
+                    </div>
+                    <div className={sStyles.field}>
+                      <label className={sStyles.label} htmlFor={`theme-${id}`}>
+                        {t('settings.theme')}
+                      </label>
+                      <select
+                        id={`theme-${id}`}
+                        className={sStyles.select}
+                        value={report.theme}
+                        onChange={e => setReport(id, { theme: e.target.value })}
+                      >
+                        <option value="">{t('settings.theme.none')}</option>
+                        {THEMES.map(th => (
+                          <option key={th} value={th}>{t(`preview.theme.${th}` as any)}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <div className={sStyles.field}>
-                    <label className={sStyles.label}>{t('settings.theme')}</label>
-                    <select
-                      className={sStyles.select}
-                      value={form.rutas_theme}
-                      onChange={e => set('rutas_theme', e.target.value)}
-                    >
-                      <option value="">{t('settings.theme.none')}</option>
-                      {THEMES.map(th => (
-                        <option key={th} value={th}>{t(`preview.theme.${th}` as any)}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </section>
-
-              {/* Escuela defaults */}
-              <section className={sStyles.section}>
-                <h3 className={sStyles.sectionTitle}>{t('settings.section.escuela')}</h3>
-                <div className={sStyles.row}>
-                  <div className={sStyles.field}>
-                    <label className={sStyles.label}>{t('settings.weeks')}</label>
-                    <input
-                      className={`${sStyles.input} ${sStyles.narrow}`}
-                      type="number"
-                      min={1} max={52}
-                      value={form.escuela_weeks}
-                      onChange={e => set('escuela_weeks', Number(e.target.value))}
-                    />
-                  </div>
-                  <div className={sStyles.field}>
-                    <label className={sStyles.label}>{t('settings.theme')}</label>
-                    <select
-                      className={sStyles.select}
-                      value={form.escuela_theme}
-                      onChange={e => set('escuela_theme', e.target.value)}
-                    >
-                      <option value="">{t('settings.theme.none')}</option>
-                      {THEMES.map(th => (
-                        <option key={th} value={th}>{t(`preview.theme.${th}` as any)}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </section>
+                </section>
+              ))}
             </>
           )}
         </div>

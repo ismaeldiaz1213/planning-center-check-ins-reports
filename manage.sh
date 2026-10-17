@@ -11,6 +11,10 @@
 
 set -e
 
+# Absolute path to this script's directory, so report_ids() can reach backend/
+# regardless of where the script is invoked from.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Load .env so GCP_PROJECT_ID, GCP_SA_EMAIL, GOOGLE_CLIENT_ID, etc. are available.
 if [[ -f ".env" ]]; then
     set -a
@@ -57,6 +61,54 @@ warn()    { echo -e "${YELLOW}⚠  ${NC}$1"; }
 error()   { echo -e "${RED}✗  ${NC}$1"; }
 
 # ── Main menu ─────────────────────────────────────────────────────────────────
+# ── Report registry ───────────────────────────────────────────────────────────
+# The set of reports comes from reports.yaml (or the built-in defaults when
+# there is no such file), read through the CLI. Adding a report there makes it
+# appear in every menu below with no edit to this script.
+
+report_ids() {
+    local ids
+    ids=$(cd "$SCRIPT_DIR/backend" && python3 main.py --list-reports --format ids 2>/dev/null) || ids=""
+    if [[ -z "$ids" ]]; then
+        warn "Could not read reports.yaml — falling back to 'rutas escuela'" >&2
+        echo "rutas escuela"
+    else
+        echo "$ids"
+    fi
+}
+
+# Prompt for one report; sets PICKED_REPORT (id) and PICKED_JOB (Cloud Run job name).
+pick_report() {
+    local prompt_text=${1:-"Choose a report"}
+    local ids=()
+    mapfile -t ids < <(report_ids)
+
+    if [[ ${#ids[@]} -eq 0 ]]; then
+        warn "No reports configured."
+        return 1
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}$prompt_text${NC}"
+    local i=1
+    for id in "${ids[@]}"; do
+        echo -e "  ${DIM}$i) $id${NC}"
+        ((i++))
+    done
+    echo ""
+    read -rp "  Choose: " REPORT_CHOICE
+
+    if ! [[ "$REPORT_CHOICE" =~ ^[0-9]+$ ]] || \
+       (( REPORT_CHOICE < 1 || REPORT_CHOICE > ${#ids[@]} )); then
+        warn "Invalid choice."
+        return 1
+    fi
+
+    PICKED_REPORT="${ids[$((REPORT_CHOICE - 1))]}"
+    PICKED_JOB="roster-$PICKED_REPORT"
+    return 0
+}
+
 show_menu() {
     clear
     echo ""
@@ -76,38 +128,81 @@ show_menu() {
     echo -e "  ${CYAN}7)${NC} Change campaign theme"
     echo ""
     echo -e "  ${BOLD}TESTING & LOGS${NC}"
-    echo -e "  ${CYAN}8)${NC} Run Rutas job now (test)"
-    echo -e "  ${CYAN}9)${NC} Run Escuela Dominical job now (test)"
-    echo -e "  ${CYAN}10)${NC} View logs — Rutas"
-    echo -e "  ${CYAN}11)${NC} View logs — Escuela Dominical"
-    echo -e "  ${CYAN}12)${NC} View job status (last run results)"
+    echo -e "  ${CYAN}8)${NC} Run a report job now (test)"
+    echo -e "  ${CYAN}9)${NC} View logs for a report"
+    echo -e "  ${CYAN}10)${NC} Sync Cloud Run jobs with reports.yaml"
+    echo -e "  ${CYAN}11)${NC} View job status (last run results)"
     echo ""
     echo -e "  ${BOLD}SCHEDULER${NC}"
-    echo -e "  ${CYAN}13)${NC} View scheduled jobs"
-    echo -e "  ${CYAN}14)${NC} Pause scheduled jobs (stop auto-run)"
-    echo -e "  ${CYAN}15)${NC} Resume scheduled jobs"
+    echo -e "  ${CYAN}12)${NC} View scheduled jobs"
+    echo -e "  ${CYAN}13)${NC} Pause scheduled jobs (stop auto-run)"
+    echo -e "  ${CYAN}14)${NC} Resume scheduled jobs"
     echo ""
     echo -e "  ${BOLD}API SERVICE${NC}"
-    echo -e "  ${CYAN}16)${NC} Deploy / redeploy API service"
-    echo -e "  ${CYAN}17)${NC} View API service URL"
-    echo -e "  ${CYAN}18)${NC} View API service logs"
-    echo -e "  ${CYAN}19)${NC} Open API service in browser"
+    echo -e "  ${CYAN}15)${NC} Deploy / redeploy API service"
+    echo -e "  ${CYAN}16)${NC} View API service URL"
+    echo -e "  ${CYAN}17)${NC} View API service logs"
+    echo -e "  ${CYAN}18)${NC} Open API service in browser"
     echo ""
     echo -e "  ${BOLD}LOCAL TESTING${NC} ${DIM}(real PCO data — no Drive upload)${NC}"
-    echo -e "  ${CYAN}20)${NC} Build local Docker image"
-    echo -e "  ${CYAN}21)${NC} Dry-run Rutas — all routes"
-    echo -e "  ${CYAN}22)${NC} Dry-run Rutas — single route"
-    echo -e "  ${CYAN}23)${NC} Dry-run Escuela Dominical — all classes"
-    echo -e "  ${CYAN}24)${NC} Dry-run Escuela Dominical — single class"
+    echo -e "  ${CYAN}19)${NC} Build local Docker image"
+    echo -e "  ${CYAN}20)${NC} Dry-run a report — all locations"
+    echo -e "  ${CYAN}21)${NC} Dry-run a report — single location"
     echo ""
     echo -e "  ${BOLD}DEMO SERVICE${NC} ${DIM}(public demo — mock data, no auth)${NC}"
-    echo -e "  ${CYAN}25)${NC} Deploy Demo Service (first-time setup)"
-    echo -e "  ${CYAN}26)${NC} View Demo URL"
-    echo -e "  ${CYAN}27)${NC} Open Demo in browser"
+    echo -e "  ${CYAN}22)${NC} Deploy Demo Service (first-time setup)"
+    echo -e "  ${CYAN}23)${NC} View Demo URL"
+    echo -e "  ${CYAN}24)${NC} Open Demo in browser"
+    echo ""
+    echo -e "  ${BOLD}GCLOUD${NC} ${DIM}(active: $(gcloud config get-value project 2>/dev/null || echo none))${NC}"
+    echo -e "  ${CYAN}25)${NC} Switch active gcloud project"
     echo ""
     echo -e "  ${DIM}q)  Quit${NC}"
     echo ""
     read -rp "  Choose an option: " CHOICE
+}
+
+# ── gcloud project switcher ───────────────────────────────────────────────────
+# Every command in this script passes --project="$PROJECT_ID" explicitly, so the
+# active gcloud project only matters for gcloud commands run by hand. This
+# toggles it between this roster project and any other project you own.
+switch_gcloud_project() {
+    local current
+    current=$(gcloud config get-value project 2>/dev/null)
+    info "Active gcloud project: ${BOLD}${current:-(none)}${NC}"
+    echo ""
+    echo -e "  ${CYAN}1)${NC} $PROJECT_ID ${DIM}(this roster project)${NC}"
+    echo -e "  ${CYAN}2)${NC} Pick from my other projects"
+    echo ""
+    read -rp "  Choose: " PROJ_CHOICE
+
+    local target
+    case $PROJ_CHOICE in
+        1) target="$PROJECT_ID" ;;
+        2)
+            local projects=()
+            mapfile -t projects < <(gcloud projects list --format="value(projectId)" 2>/dev/null)
+            if [[ ${#projects[@]} -eq 0 ]]; then
+                warn "No projects found (try 'gcloud auth login')."
+                return
+            fi
+            local i=1
+            for p in "${projects[@]}"; do
+                echo -e "  ${DIM}$i) $p${NC}"
+                ((i++))
+            done
+            read -rp "  Choose: " P
+            if ! [[ "$P" =~ ^[0-9]+$ ]] || (( P < 1 || P > ${#projects[@]} )); then
+                warn "Invalid choice."
+                return
+            fi
+            target="${projects[$((P - 1))]}"
+            ;;
+        *) warn "Invalid choice."; return ;;
+    esac
+
+    gcloud config set project "$target"
+    success "Active gcloud project is now: $target"
 }
 
 # ── Secret helpers ────────────────────────────────────────────────────────────
@@ -215,31 +310,153 @@ deploy_script() {
     echo ""
     info "Updating jobs to use new image..."
 
-    gcloud run jobs update roster-rutas \
-        --image="$IMAGE" \
-        --region="$REGION" \
-        --project="$PROJECT_ID"
+    for report_id in $(report_ids); do
+        _ensure_job "$report_id"
+        _ensure_schedule "$report_id"
+    done
 
-    gcloud run jobs update roster-escuela-dominical \
-        --image="$IMAGE" \
-        --region="$REGION" \
-        --project="$PROJECT_ID"
-
-    success "Both jobs updated to latest image."
+    success "All report jobs updated to latest image."
+    info "Run option 10 (Sync Cloud Run jobs) if you have renamed or removed a report."
     echo ""
-    read -rp "  Would you like to test Rutas now? (y/N): " RUN_NOW
+    read -rp "  Would you like to test a report now? (y/N): " RUN_NOW
     if [[ "$RUN_NOW" =~ ^[Yy]$ ]]; then
-        _execute_job "roster-rutas" "Rutas"
+        pick_report "Which report should run?" && _execute_job "$PICKED_JOB" "$PICKED_REPORT"
     fi
+}
+
+_job_exists() {
+    gcloud run jobs describe "$1" --region="$REGION" --project="$PROJECT_ID" &>/dev/null
+}
+
+_schedule_exists() {
+    gcloud scheduler jobs describe "$1" --location="$REGION" --project="$PROJECT_ID" &>/dev/null
+}
+
+# Create the Cloud Run job for a report if it is missing; otherwise point the
+# existing job at the current image. Used by both "deploy code" and "sync jobs"
+# so a report newly added to reports.yaml does not need a full setup_gcloud run.
+_ensure_job() {
+    local report_id=$1
+    local job_name="roster-$report_id"
+
+    if _job_exists "$job_name"; then
+        gcloud run jobs update "$job_name" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --project="$PROJECT_ID"
+        success "Updated: $job_name"
+    else
+        info "$job_name does not exist yet — creating it..."
+        gcloud run jobs create "$job_name" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --project="$PROJECT_ID" \
+            --service-account="$SA_EMAIL" \
+            --set-secrets="$SECRET_ENV" \
+            --set-env-vars="GOOGLE_APPLICATION_CREDENTIALS=$CRED_MOUNT_PATH" \
+            --args="$report_id" \
+            --task-timeout=3600
+        success "Created: $job_name"
+    fi
+}
+
+# Create the Monday scheduler entry for a report if it is missing.
+_ensure_schedule() {
+    local report_id=$1
+    local job_name="roster-$report_id"
+    local scheduler_name="run-roster-$report_id"
+    local job_uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/$job_name:run"
+
+    if _schedule_exists "$scheduler_name"; then
+        return
+    fi
+    info "$scheduler_name does not exist yet — creating it..."
+    gcloud scheduler jobs create http "$scheduler_name" \
+        --schedule="0 8 * * 1" \
+        --uri="$job_uri" \
+        --message-body='{}' \
+        --oauth-service-account-email="$SA_EMAIL" \
+        --location="$REGION" \
+        --project="$PROJECT_ID"
+    success "Scheduled: $scheduler_name (Mondays 08:00 UTC)"
+}
+
+# Reconcile Cloud Run with reports.yaml: create anything missing, and report any
+# roster-* job that no longer corresponds to a configured report. Orphans matter
+# because a stale job keeps firing on its old schedule and would generate a
+# duplicate set of rosters.
+sync_jobs() {
+    echo ""
+    echo -e "${BOLD}── Sync Cloud Run Jobs with reports.yaml ────────────────────${NC}"
+    echo ""
+
+    local configured=()
+    mapfile -t configured < <(report_ids)
+    info "Configured reports: ${configured[*]}"
+    echo ""
+
+    for report_id in "${configured[@]}"; do
+        _ensure_job "$report_id"
+        _ensure_schedule "$report_id"
+    done
+
+    # ── Orphan detection ──────────────────────────────────────────────────────
+    echo ""
+    info "Checking for jobs that no longer match a configured report..."
+
+    local existing=()
+    mapfile -t existing < <(gcloud run jobs list \
+        --region="$REGION" --project="$PROJECT_ID" \
+        --format="value(metadata.name)" 2>/dev/null | grep '^roster-' || true)
+
+    local orphans=()
+    for job_name in "${existing[@]}"; do
+        [[ -z "$job_name" ]] && continue
+        local id="${job_name#roster-}"
+        local found=0
+        for report_id in "${configured[@]}"; do
+            [[ "$id" == "$report_id" ]] && found=1 && break
+        done
+        (( found )) || orphans+=("$job_name")
+    done
+
+    if [[ ${#orphans[@]} -eq 0 ]]; then
+        success "No orphaned jobs. Cloud Run matches reports.yaml."
+        return
+    fi
+
+    echo ""
+    warn "These Cloud Run jobs do not match any report in reports.yaml:"
+    for job_name in "${orphans[@]}"; do
+        echo -e "    ${YELLOW}$job_name${NC}"
+    done
+    echo ""
+    warn "Left in place, each keeps running on its own schedule and will generate"
+    warn "a duplicate set of rosters every week."
+    echo ""
+    read -rp "  Delete these jobs and their schedules? (y/N): " CONFIRM
+    [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Left in place."; return; }
+
+    for job_name in "${orphans[@]}"; do
+        local scheduler_name="run-${job_name}"
+        if _schedule_exists "$scheduler_name"; then
+            gcloud scheduler jobs delete "$scheduler_name" \
+                --location="$REGION" --project="$PROJECT_ID" --quiet \
+                && success "Deleted schedule: $scheduler_name"
+        fi
+        gcloud run jobs delete "$job_name" \
+            --region="$REGION" --project="$PROJECT_ID" --quiet \
+            && success "Deleted job: $job_name"
+    done
 }
 
 _recreate_jobs() {
     echo ""
     info "Recreating Cloud Run jobs..."
 
-    for job_name in roster-rutas roster-escuela-dominical; do
-        local event_arg
-        [[ "$job_name" == "roster-rutas" ]] && event_arg="Rutas" || event_arg="Escuela Dominical"
+    for report_id in $(report_ids); do
+        local job_name="roster-$report_id"
+        local event_arg="$report_id"
 
         if gcloud run jobs describe "$job_name" \
                 --region="$REGION" --project="$PROJECT_ID" &>/dev/null; then
@@ -278,7 +495,7 @@ _execute_job() {
         --region="$REGION" \
         --project="$PROJECT_ID"
 
-    success "Job started. Watch logs with option 9 or 10."
+    success "Job started. Watch logs with option 9."
 }
 
 # ── Log viewers ───────────────────────────────────────────────────────────────
@@ -328,7 +545,8 @@ view_job_status() {
     echo ""
     echo -e "${BOLD}── Job Status ───────────────────────────────────────────────${NC}"
     echo ""
-    for job in roster-rutas roster-escuela-dominical; do
+    for report_id in $(report_ids); do
+        local job="roster-$report_id"
         echo -e "  ${BOLD}$job${NC}"
         gcloud run jobs describe "$job" \
             --region="$REGION" \
@@ -358,7 +576,8 @@ pause_scheduler() {
     read -rp "  Confirm pause? (y/N): " CONFIRM
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; return; }
 
-    for job in run-roster-rutas run-roster-escuela-dominical; do
+    for report_id in $(report_ids); do
+        local job="run-roster-$report_id"
         gcloud scheduler jobs pause "$job" \
             --location="$REGION" \
             --project="$PROJECT_ID" 2>/dev/null && \
@@ -372,7 +591,8 @@ resume_scheduler() {
     read -rp "  Confirm resume? (y/N): " CONFIRM
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; return; }
 
-    for job in run-roster-rutas run-roster-escuela-dominical; do
+    for report_id in $(report_ids); do
+        local job="run-roster-$report_id"
         gcloud scheduler jobs resume "$job" \
             --location="$REGION" \
             --project="$PROJECT_ID" 2>/dev/null && \
@@ -404,11 +624,11 @@ change_theme() {
     esac
 
     echo ""
-    info "Updating both jobs to: $THEME_LABEL"
+    info "Updating all report jobs to: $THEME_LABEL"
 
-    for job_name in roster-rutas roster-escuela-dominical; do
-        local event_arg
-        [[ "$job_name" == "roster-rutas" ]] && event_arg="Rutas" || event_arg="Escuela Dominical"
+    for report_id in $(report_ids); do
+        local job_name="roster-$report_id"
+        local event_arg="$report_id"
 
         # Cloud Run --args is a comma-separated list of individual tokens.
         # "--theme primavera" as one token fails; must be "--theme,primavera" (two).
@@ -738,28 +958,27 @@ while true; do
         5)  update_credentials ;;
         6)  deploy_script ;;
         7)  change_theme ;;
-        8)  _execute_job "roster-rutas" "Rutas" ;;
-        9)  _execute_job "roster-escuela-dominical" "Escuela Dominical" ;;
-        10) view_logs "roster-rutas" "Rutas" ;;
-        11) view_logs "roster-escuela-dominical" "Escuela Dominical" ;;
-        12) view_job_status ;;
-        13) view_scheduler ;;
-        14) pause_scheduler ;;
-        15) resume_scheduler ;;
-        16) deploy_api_service ;;
-        17) view_api_url ;;
-        18) view_api_logs ;;
-        19) open_api_in_browser ;;
-        20) build_local_image ;;
-        21) dry_run_job "Rutas" ;;
-        22) dry_run_single "Rutas" "route" "Ruta 1" ;;
-        23) dry_run_job "Escuela Dominical" ;;
-        24) dry_run_single "Escuela Dominical" "class" "Nursery" ;;
-        25) deploy_demo_service ;;
-        26) view_demo_url ;;
-        27) open_demo_in_browser ;;
+        8)  pick_report "Which report should run?" && _execute_job "$PICKED_JOB" "$PICKED_REPORT" ;;
+        9)  pick_report "Whose logs?" && view_logs "$PICKED_JOB" "$PICKED_REPORT" ;;
+        10) sync_jobs ;;
+        11) view_job_status ;;
+        12) view_scheduler ;;
+        13) pause_scheduler ;;
+        14) resume_scheduler ;;
+        15) deploy_api_service ;;
+        16) view_api_url ;;
+        17) view_api_logs ;;
+        18) open_api_in_browser ;;
+        19) build_local_image ;;
+        20) pick_report "Which report should dry-run?" && dry_run_job "$PICKED_REPORT" ;;
+        21) pick_report "Which report should dry-run?" && \
+            dry_run_single "$PICKED_REPORT" "location" "Ruta 1 / Nursery" ;;
+        22) deploy_demo_service ;;
+        23) view_demo_url ;;
+        24) open_demo_in_browser ;;
+        25) switch_gcloud_project ;;
         q|Q) echo ""; info "Goodbye!"; echo ""; exit 0 ;;
-        *)  warn "Invalid option — please choose 1-27 or q." ;;
+        *)  warn "Invalid option — please choose 1-25 or q." ;;
     esac
 
     echo ""

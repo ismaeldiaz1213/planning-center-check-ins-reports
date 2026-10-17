@@ -19,6 +19,10 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-web.txt
 
 COPY backend/ .
 
+# Report definitions live at the project root, outside backend/. The glob makes
+# this optional — without it the app falls back to its built-in defaults.
+COPY reports.yaml* ./
+
 # credentials.json is NOT baked into the image.
 # Supply it at runtime:
 #   Cloud Run: mount to a path outside /app — a secret volume replaces the entire last

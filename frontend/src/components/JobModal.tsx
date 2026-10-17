@@ -5,21 +5,25 @@ import { useLanguage } from '../i18n/LanguageContext'
 import StatusBadge from './StatusBadge'
 import styles from './Modal.module.css'
 
+import type { Report } from '../types'
+
 interface Props {
-  type:    'rutas' | 'escuela'
+  report:  Report
   onClose: () => void
 }
 
-export default function JobModal({ type, onClose }: Props) {
-  const { t } = useLanguage()
+export default function JobModal({ report, onClose }: Props) {
+  const { t, tOr } = useLanguage()
   const [jobId, setJobId]   = useState<string | null>(null)
   const [error, setError]   = useState<string | null>(null)
   const { job, lines }      = useJob(jobId)
   const terminalRef         = useRef<HTMLDivElement>(null)
 
-  const titleKey = type === 'rutas' ? 'job.rutas.title' : 'job.escuela.title'
-  const descKey  = type === 'rutas' ? 'job.rutas.desc'  : 'job.escuela.desc'
-  const status   = (job?.status ?? 'idle') as 'idle' | 'running' | 'success' | 'failed'
+  // Reports configured in reports.yaml may have no translation keys; fall back
+  // to the label the backend supplies.
+  const title = tOr(`job.${report.id}.title`, report.label)
+  const desc  = tOr(`job.${report.id}.desc`, t('job.report.desc'))
+  const status = (job?.status ?? 'idle') as 'idle' | 'running' | 'success' | 'failed'
   const isRunning = status === 'running'
 
   useEffect(() => {
@@ -30,7 +34,7 @@ export default function JobModal({ type, onClose }: Props) {
   const handleRun = async () => {
     setError(null)
     try {
-      const res = await runJob(type)
+      const res = await runJob(report.id)
       setJobId(res.job_id)
     } catch (e) {
       setError(String(e))
@@ -43,8 +47,8 @@ export default function JobModal({ type, onClose }: Props) {
 
         <div className={styles.header}>
           <div>
-            <div className={styles.headerTitle}>{t(titleKey)}</div>
-            <div className={styles.headerSub}>{t(descKey)}</div>
+            <div className={styles.headerTitle}>{title}</div>
+            <div className={styles.headerSub}>{desc}</div>
           </div>
           <button className={styles.closeBtn} onClick={onClose} aria-label="Close">✕</button>
         </div>

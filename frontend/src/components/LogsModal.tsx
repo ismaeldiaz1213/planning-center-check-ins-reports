@@ -27,7 +27,7 @@ function timeAgo(iso: string): string {
 }
 
 export default function LogsModal({ onClose }: Props) {
-  const { t } = useLanguage()
+  const { t, tOr } = useLanguage()
   const [jobs, setJobs]         = useState<Job[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   const [loading, setLoading]   = useState(false)
@@ -45,9 +45,9 @@ export default function LogsModal({ onClose }: Props) {
   useEffect(() => { load() }, [load])
 
   const jobTypeLabel = (type: string) => {
-    if (type === 'rutas')   return t('logs.type.rutas')
-    if (type === 'escuela') return t('logs.type.escuela')
-    return t('logs.type.preview')
+    if (type === 'preview') return t('logs.type.preview')
+    // Report ids come from reports.yaml; fall back to the id when untranslated.
+    return tOr(`logs.type.${type}`, type)
   }
 
   return (

@@ -1,4 +1,4 @@
-.PHONY: backend-test frontend-test test lint preview build promote-checkin-locations promote-checkin
+.PHONY: backend-test frontend-test test lint preview build promote-checkin-locations promote-checkin backfill-bus-class
 
 backend-test:
 	cd backend && pytest
@@ -38,6 +38,19 @@ promote-checkin:
 	cd backend && python promote_checkins.py \
 		--from-location "$(FROM)" --to-location "$(TO)" \
 		$(if $(EVENT),--event "$(EVENT)",) \
+		$(if $(WEEKS),--weeks $(WEEKS),) \
+		$(if $(TIME),--time "$(TIME)",) \
+		$(if $(MAX_AGE),--max-age $(MAX_AGE),) \
+		$(if $(DRY_RUN),--dry-run,)
+
+# Seed the "C" Escuela Dominical classes with bus-route kids (grade 7–12) by checking
+# them into the most recent Sunday, so Check-Ins pre-select suggests their class.
+# Safe to re-run — existing check-ins come back as duplicates.
+#   make backfill-bus-class DRY_RUN=1
+#   make backfill-bus-class
+# Optional: WEEKS=5, TIME=10:45, MAX_AGE=20 (all shown are defaults)
+backfill-bus-class:
+	cd backend && python backfill_bus_class.py \
 		$(if $(WEEKS),--weeks $(WEEKS),) \
 		$(if $(TIME),--time "$(TIME)",) \
 		$(if $(MAX_AGE),--max-age $(MAX_AGE),) \

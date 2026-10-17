@@ -1,4 +1,4 @@
-import type { Job, Preview, GenerateRequest, Settings, SettingsWrite } from '../types'
+import type { Job, Preview, GenerateRequest, Report, Settings, SettingsWrite } from '../types'
 
 let _authToken: string | null = null
 
@@ -37,8 +37,13 @@ export async function fetchJob(jobId: string, since = 0): Promise<Job> {
   return apiFetch(`/api/jobs/${jobId}?since=${since}`)
 }
 
-export async function runJob(type: 'rutas' | 'escuela'): Promise<{ job_id: string }> {
-  return apiFetch(`/api/jobs/${type}/run`, { method: 'POST' })
+export async function fetchReports(): Promise<{ reports: Report[] }> {
+  return apiFetch('/api/reports')
+}
+
+/** Trigger a run for one configured report. `reportId` comes from /api/reports. */
+export async function runJob(reportId: string): Promise<{ job_id: string }> {
+  return apiFetch(`/api/jobs/${encodeURIComponent(reportId)}/run`, { method: 'POST' })
 }
 
 export async function fetchSettings(): Promise<Settings> {

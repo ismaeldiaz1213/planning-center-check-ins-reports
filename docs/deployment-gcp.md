@@ -31,10 +31,10 @@ The script walks through interactively:
 2. Creates an Artifact Registry repository for Docker images
 3. Stores PCO credentials and `credentials.json` as secrets in Secret Manager
 4. Builds the Docker image and pushes to Artifact Registry
-5. Creates the two Cloud Run Jobs (`roster-rutas`, `roster-escuela-dominical`)
+5. Creates one Cloud Run Job per report in `reports.yaml` (`roster-rutas`, `roster-escuela`, `roster-escuela-b`, …)
 6. Creates the Cloud Scheduler jobs (Monday 8:00 AM UTC = 2:00 AM CST)
 
-After it finishes, run `./manage.sh → option 12` to confirm both jobs have a green status.
+After it finishes, run `./manage.sh → option 11` to confirm every report's job has a green status.
 
 ---
 
@@ -59,23 +59,47 @@ DEPLOYMENT
   7)  Change campaign theme
 
 TESTING & LOGS
-  8)  Run Rutas job now (test)
-  9)  Run Escuela Dominical job now (test)
-  10) View logs — Rutas
-  11) View logs — Escuela Dominical
-  12) View job status (last run results)
+  8)  Run a report job now (test)
+  9)  View logs for a report
+  10) Sync Cloud Run jobs with reports.yaml
+  11) View job status (last run results)
 
 SCHEDULER
-  13) View scheduled jobs
-  14) Pause scheduled jobs
-  15) Resume scheduled jobs
+  12) View scheduled jobs
+  13) Pause scheduled jobs
+  14) Resume scheduled jobs
 
 API SERVICE
-  16) Deploy / redeploy API service (web UI + API)
-  17) View API service URL
-  18) View API service logs
-  19) Open API service in browser
+  15) Deploy / redeploy API service (web UI + API)
+  16) View API service URL
+  17) View API service logs
+  18) Open API service in browser
+
+LOCAL TESTING
+  19) Build local Docker image
+  20) Dry-run a report — all locations
+  21) Dry-run a report — single location
+
+DEMO SERVICE
+  22) Deploy Demo Service
+  23) View Demo URL
+  24) Open Demo in browser
 ```
+
+Options 8, 9, 20 and 21 list the reports from `reports.yaml` and let you pick one.
+
+### Option 10 — Sync Cloud Run jobs
+
+Reconciles Cloud Run with `reports.yaml`:
+
+- **Creates** a `roster-<id>` job and a `run-roster-<id>` Monday schedule for any report that
+  doesn't have one yet. This is how a report newly added to `reports.yaml` gets deployed —
+  no full `setup_gcloud.sh` run needed.
+- **Reports orphans** — any `roster-*` job with no matching report — and offers to delete them
+  along with their schedules. This matters after renaming a report id: the old job keeps
+  firing on its own schedule and would generate a duplicate set of rosters every week.
+
+Option 6 (deploy code) also creates missing jobs, but only option 10 finds orphans.
 
 ---
 
@@ -89,8 +113,8 @@ cd ..
 ./manage.sh → option 6
 ```
 
-Option 6 builds a new Docker image and updates both Cloud Run Jobs in one step. You must
-do both — pushing the image alone does not update the running jobs.
+Option 6 builds a new Docker image and updates every report's Cloud Run Job in one step.
+You must do both — pushing the image alone does not update the running jobs.
 
 To do it manually (replace `YOUR_PROJECT` with your GCP project ID):
 
@@ -103,9 +127,11 @@ gcloud run jobs update roster-rutas \
     --image=us-central1-docker.pkg.dev/YOUR_PROJECT/roster-repo/roster:latest \
     --region=us-central1 --project=YOUR_PROJECT
 
-gcloud run jobs update roster-escuela-dominical \
+gcloud run jobs update roster-escuela \
     --image=us-central1-docker.pkg.dev/YOUR_PROJECT/roster-repo/roster:latest \
     --region=us-central1 --project=YOUR_PROJECT
+
+# …repeat for each remaining roster-<report-id> job
 ```
 
 ---
@@ -122,7 +148,7 @@ Or manually:
 
 ```bash
 gcloud run jobs update roster-rutas \
-    --args="Rutas,--theme,primavera" \
+    --args="rutas,--theme,primavera" \
     --region=us-central1 --project=YOUR_PROJECT
 ```
 
@@ -133,7 +159,7 @@ To revert to no theme:
 
 ```bash
 gcloud run jobs update roster-rutas \
-    --args="Rutas" \
+    --args="rutas" \
     --region=us-central1 --project=YOUR_PROJECT
 ```
 
@@ -144,7 +170,8 @@ gcloud run jobs update roster-rutas \
 | Job | Cron | Default time |
 |-----|------|-------------|
 | `roster-rutas` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
-| `roster-escuela-dominical` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
+| `roster-escuela` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
+| `roster-escuela-b` | `0 8 * * 1` | Monday 8:00 AM UTC (2:00 AM CST / 3:00 AM CDT) |
 
 To adjust for daylight saving time:
 ```bash
@@ -169,16 +196,16 @@ cd frontend && npm run build
 This writes the built app to `backend/static/`. Then deploy:
 
 ```bash
-./manage.sh → option 16
+./manage.sh → option 15
 ```
 
-Option 16 reads `GOOGLE_CLIENT_ID` from `.env` and passes it to Cloud Run as an environment
+Option 15 reads `GOOGLE_CLIENT_ID` from `.env` and passes it to Cloud Run as an environment
 variable automatically.
 
 To get the service URL after deployment:
 
 ```bash
-./manage.sh → option 17
+./manage.sh → option 16
 ```
 
 ---
@@ -198,7 +225,7 @@ To update `credentials.json` after rotating your service account key:
 ./manage.sh → option 5
 ```
 
-This uploads the new file to Secret Manager and redeploys both jobs.
+This uploads the new file to Secret Manager and redeploys every report's job.
 
 ---
 
@@ -212,7 +239,7 @@ docker build -f Dockerfile -t roster-job .
 docker run --rm \
   -v $(pwd)/credentials.json:/app/credentials.json \
   --env-file .env \
-  roster-job python main.py "Rutas"
+  roster-job python main.py rutas
 ```
 
 This uses your local credentials and `.env` without touching any Cloud resources.
