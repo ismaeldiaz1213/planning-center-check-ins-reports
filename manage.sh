@@ -43,6 +43,11 @@ CRED_MOUNT_PATH="/secrets/credentials.json"
 # if mounted straight into /app. drive_client.py reads GOOGLE_APPLICATION_CREDENTIALS
 # to find it there instead.
 SECRET_ENV="$CRED_MOUNT_PATH=google-service-account-key:latest,PCO_APP_ID=PCO_APP_ID:latest,PCO_SECRET=PCO_SECRET:latest,GOOGLE_DRIVE_PARENT_FOLDER_ID=GOOGLE_DRIVE_PARENT_FOLDER_ID:latest"
+# One scheduled job runs every report in a single process (python main.py --all),
+# so shared PCO data is fetched once and PCO is never hit by parallel jobs.
+# The per-report roster-<id> jobs stay, unscheduled, for one-off runs (option 8).
+WEEKLY_JOB="roster-weekly"
+WEEKLY_SCHEDULE="run-roster-weekly"
 LOCAL_IMAGE="roster-job-local"
 LOCAL_OUT_DIR="./out"
 
@@ -311,9 +316,10 @@ deploy_script() {
     info "Updating jobs to use new image..."
 
     for report_id in $(report_ids); do
-        _ensure_job "$report_id"
-        _ensure_schedule "$report_id"
+        _ensure_job "roster-$report_id" "$report_id"
     done
+    _ensure_job "$WEEKLY_JOB" "--all"
+    _ensure_schedule
 
     success "All report jobs updated to latest image."
     info "Run option 10 (Sync Cloud Run jobs) if you have renamed or removed a report."
@@ -332,16 +338,19 @@ _schedule_exists() {
     gcloud scheduler jobs describe "$1" --location="$REGION" --project="$PROJECT_ID" &>/dev/null
 }
 
-# Create the Cloud Run job for a report if it is missing; otherwise point the
-# existing job at the current image. Used by both "deploy code" and "sync jobs"
-# so a report newly added to reports.yaml does not need a full setup_gcloud run.
+# Create a Cloud Run job if it is missing; otherwise point it at the current
+# image. Used by both "deploy code" and "sync jobs" so a report newly added to
+# reports.yaml does not need a full setup_gcloud run.
+#   _ensure_job roster-escuela escuela     # one report, run by hand
+#   _ensure_job roster-weekly --all        # every report, run on the schedule
 _ensure_job() {
-    local report_id=$1
-    local job_name="roster-$report_id"
+    local job_name=$1
+    local job_args=$2
 
     if _job_exists "$job_name"; then
         gcloud run jobs update "$job_name" \
             --image="$IMAGE" \
+            --args="$job_args" \
             --region="$REGION" \
             --project="$PROJECT_ID"
         success "Updated: $job_name"
@@ -354,31 +363,28 @@ _ensure_job() {
             --service-account="$SA_EMAIL" \
             --set-secrets="$SECRET_ENV" \
             --set-env-vars="GOOGLE_APPLICATION_CREDENTIALS=$CRED_MOUNT_PATH" \
-            --args="$report_id" \
+            --args="$job_args" \
             --task-timeout=3600
         success "Created: $job_name"
     fi
 }
 
-# Create the Monday scheduler entry for a report if it is missing.
+# Create the Monday schedule for the weekly all-reports job if it is missing.
 _ensure_schedule() {
-    local report_id=$1
-    local job_name="roster-$report_id"
-    local scheduler_name="run-roster-$report_id"
-    local job_uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/$job_name:run"
+    local job_uri="https://$REGION-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/$PROJECT_ID/jobs/$WEEKLY_JOB:run"
 
-    if _schedule_exists "$scheduler_name"; then
+    if _schedule_exists "$WEEKLY_SCHEDULE"; then
         return
     fi
-    info "$scheduler_name does not exist yet — creating it..."
-    gcloud scheduler jobs create http "$scheduler_name" \
+    info "$WEEKLY_SCHEDULE does not exist yet — creating it..."
+    gcloud scheduler jobs create http "$WEEKLY_SCHEDULE" \
         --schedule="0 8 * * 1" \
         --uri="$job_uri" \
         --message-body='{}' \
         --oauth-service-account-email="$SA_EMAIL" \
         --location="$REGION" \
         --project="$PROJECT_ID"
-    success "Scheduled: $scheduler_name (Mondays 08:00 UTC)"
+    success "Scheduled: $WEEKLY_SCHEDULE (Mondays 08:00 UTC)"
 }
 
 # Reconcile Cloud Run with reports.yaml: create anything missing, and report any
@@ -396,9 +402,30 @@ sync_jobs() {
     echo ""
 
     for report_id in "${configured[@]}"; do
-        _ensure_job "$report_id"
-        _ensure_schedule "$report_id"
+        _ensure_job "roster-$report_id" "$report_id"
     done
+    _ensure_job "$WEEKLY_JOB" "--all"
+    _ensure_schedule
+
+    # ── Per-report schedules are replaced by the weekly job ──────────────────
+    local old_schedules=()
+    mapfile -t old_schedules < <(gcloud scheduler jobs list \
+        --location="$REGION" --project="$PROJECT_ID" \
+        --format="value(name.basename())" 2>/dev/null \
+        | grep '^run-roster-' | grep -v "^$WEEKLY_SCHEDULE\$" || true)
+    if [[ ${#old_schedules[@]} -gt 0 && -n "${old_schedules[0]}" ]]; then
+        echo ""
+        warn "These per-report schedules would run rosters a second time alongside $WEEKLY_SCHEDULE:"
+        for name in "${old_schedules[@]}"; do echo -e "    ${YELLOW}$name${NC}"; done
+        read -rp "  Delete them? (y/N): " CONFIRM
+        if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+            for name in "${old_schedules[@]}"; do
+                gcloud scheduler jobs delete "$name" \
+                    --location="$REGION" --project="$PROJECT_ID" --quiet \
+                    && success "Deleted schedule: $name"
+            done
+        fi
+    fi
 
     # ── Orphan detection ──────────────────────────────────────────────────────
     echo ""
@@ -411,7 +438,7 @@ sync_jobs() {
 
     local orphans=()
     for job_name in "${existing[@]}"; do
-        [[ -z "$job_name" ]] && continue
+        [[ -z "$job_name" || "$job_name" == "$WEEKLY_JOB" ]] && continue
         local id="${job_name#roster-}"
         local found=0
         for report_id in "${configured[@]}"; do
@@ -478,6 +505,7 @@ _recreate_jobs() {
 
         success "Job recreated: $job_name"
     done
+    _ensure_job "$WEEKLY_JOB" "--all"
 }
 
 # ── Job runners ───────────────────────────────────────────────────────────────
@@ -576,13 +604,10 @@ pause_scheduler() {
     read -rp "  Confirm pause? (y/N): " CONFIRM
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; return; }
 
-    for report_id in $(report_ids); do
-        local job="run-roster-$report_id"
-        gcloud scheduler jobs pause "$job" \
-            --location="$REGION" \
-            --project="$PROJECT_ID" 2>/dev/null && \
-            success "Paused: $job" || warn "Could not pause $job (may already be paused)"
-    done
+    gcloud scheduler jobs pause "$WEEKLY_SCHEDULE" \
+        --location="$REGION" \
+        --project="$PROJECT_ID" 2>/dev/null && \
+        success "Paused: $WEEKLY_SCHEDULE" || warn "Could not pause $WEEKLY_SCHEDULE (may already be paused)"
 }
 
 resume_scheduler() {
@@ -591,13 +616,10 @@ resume_scheduler() {
     read -rp "  Confirm resume? (y/N): " CONFIRM
     [[ "$CONFIRM" =~ ^[Yy]$ ]] || { info "Cancelled."; return; }
 
-    for report_id in $(report_ids); do
-        local job="run-roster-$report_id"
-        gcloud scheduler jobs resume "$job" \
-            --location="$REGION" \
-            --project="$PROJECT_ID" 2>/dev/null && \
-            success "Resumed: $job" || warn "Could not resume $job"
-    done
+    gcloud scheduler jobs resume "$WEEKLY_SCHEDULE" \
+        --location="$REGION" \
+        --project="$PROJECT_ID" 2>/dev/null && \
+        success "Resumed: $WEEKLY_SCHEDULE" || warn "Could not resume $WEEKLY_SCHEDULE"
 }
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

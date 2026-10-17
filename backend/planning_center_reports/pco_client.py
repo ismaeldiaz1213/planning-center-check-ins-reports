@@ -1,24 +1,29 @@
 # planning_center_reports/pco_client.py
 #
 # All communication with the Planning Center Online (PCO) API lives here.
-# The public surface is seven functions:
 #   get_event_id               — resolve an event name to its PCO ID
-#   get_recent_event_periods   — fetch the N most recent Sunday periods
+#   get_event_periods_since    — every past Sunday period on or after a start date
+#   get_recent_event_periods   — the N most recent past periods (used by the scripts)
 #   get_checkins_for_event_periods — paginate through all check-ins for those periods
-#   get_person_details         — fetch phone, address, birthday, grade for one person
-#   get_helpers_set            — return set of person_ids old enough to count as helpers
+#   person_details             — phone/address/birthday/grade from a sideloaded Person
+#   get_person_details         — the same, fetched from the People API (scripts only)
 #   get_location_id            — resolve a Check-Ins location name to its PCO ID
 #   get_event_times            — list an event period's service times (hour/minute/name)
 #   age_from_birthday          — compute age in years from an ISO-8601 birthday string
 #
-# get_person_details is the hot path — it is called once per unique attendee and
-# implements retry logic for rate-limits and network errors. Results are cached
-# in _person_cache (keyed by person_id) so repeat calls within a single run are
-# free.
+# The roster pipeline never calls the People API: check-ins are fetched with
+# include=person, and the Check-Ins Person already carries phone numbers,
+# addresses, birthdate, grade, gender and created_at. That keeps a whole-school-
+# year run to a few hundred requests.
+#
+# Every request goes through _get(), which paces calls under PCO's limit of
+# 100 requests per 20 seconds, honours Retry-After on 429, and retries network
+# errors with exponential back-off.
 
 import re
 import time
-from datetime import date, datetime, timezone
+from collections import deque
+from datetime import UTC, date, datetime
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -33,17 +38,73 @@ _auth = HTTPBasicAuth(PCO_APP_ID, PCO_SECRET)
 
 class PaginationCircuitBreakerError(Exception):
     """Raised when a per-period page count exceeds _MAX_PAGES_PER_PERIOD.
-    Not caught by get_helpers_set's broad except — propagates to abort the run."""
+    Propagates to abort the run rather than generate rosters from partial data."""
 
 # Module-level cache: person_id → details dict. Shared across the whole run so
 # a person who appears on multiple bus routes is only fetched once.
 _person_cache: dict = {}
 
-# Module-level cache: (event_name, weeks, min_age) → set of helper person_ids.
-# Populated by get_helpers_set() and reused across reports in the same run so a
-# shared helpers event is only fetched once. Keyed rather than flat because two
-# reports may point at different helper events (or different age thresholds).
-_helpers_cache: dict[tuple[str, int, int], set] = {}
+# ── Request pacing ────────────────────────────────────────────────────────────
+# PCO allows 100 requests per rolling 20 s per app. Staying at 80 leaves room
+# for anyone else using the same credentials at the same moment.
+_RATE_WINDOW_S = 20.0
+_RATE_MAX      = 80
+_MAX_RETRIES   = 7
+_request_times: deque = deque()
+
+_NETWORK_ERRORS = (
+    requests.exceptions.SSLError,
+    requests.exceptions.ReadTimeout,
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+)
+
+
+def _throttle() -> None:
+    """Block until one more request fits in the rolling rate window."""
+    now = time.monotonic()
+    while _request_times and now - _request_times[0] >= _RATE_WINDOW_S:
+        _request_times.popleft()
+    if len(_request_times) >= _RATE_MAX:
+        wait = _RATE_WINDOW_S - (now - _request_times[0])
+        if wait > 0:
+            time.sleep(wait)
+        _request_times.popleft()
+    _request_times.append(time.monotonic())
+
+
+def _retry_after(response) -> int | None:
+    """Seconds PCO asked us to wait, from the Retry-After header, if present."""
+    raw = (getattr(response, "headers", None) or {}).get("Retry-After")
+    try:
+        return max(1, int(float(raw)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _get(url: str, params: dict | None = None, label: str = "request"):
+    """GET with pacing, 429 handling and network retries.
+
+    Returns the final Response (which may still be a non-2xx error the caller
+    handles), or None when every attempt failed with a network error.
+    """
+    for attempt in range(_MAX_RETRIES):
+        _throttle()
+        try:
+            response = requests.get(url, auth=_auth, params=params, timeout=60)
+        except _NETWORK_ERRORS as e:
+            wait = 2 ** attempt
+            print(f"  {type(e).__name__} on {label} — retrying in {wait}s "
+                  f"({attempt + 1}/{_MAX_RETRIES})...", flush=True)
+            time.sleep(wait)
+            continue
+        if response.status_code == 429:
+            wait = _retry_after(response) or 2 ** attempt
+            print(f"  Rate limited by PCO on {label} — waiting {wait}s...", flush=True)
+            time.sleep(wait)
+            continue
+        return response
+    return None
 
 # PCO integer → display-string mapping for the grade field on People records.
 GRADE_MAP = {
@@ -78,7 +139,9 @@ def get_event_id(event_name: str) -> str:
     url    = f"{BASE_URL}/check-ins/v2/events"
     params = {"per_page": 100}
     while url:
-        response = requests.get(url, auth=_auth, params=params)
+        response = _get(url, params, label="event lookup")
+        if response is None:
+            raise Exception("Could not reach Planning Center to look up events")
         response.raise_for_status()
         body = response.json()
         for event in body["data"]:
@@ -95,6 +158,7 @@ def _format_period_date(starts_at: str) -> str:
     "2025-04-06T00:00:00Z" → "Abr 6"
     """
     from datetime import datetime
+
     from planning_center_reports.config import MESES_ABREV
     if not starts_at:
         return ""
@@ -120,9 +184,11 @@ def get_recent_event_periods(event_id: str, weeks: int = 5) -> tuple:
     """
     url      = f"{BASE_URL}/check-ins/v2/events/{event_id}/event_periods"
     params   = {"order": "-starts_at", "per_page": 100}
-    response = requests.get(url, auth=_auth, params=params)
+    response = _get(url, params, label="event periods")
+    if response is None:
+        raise Exception("Could not reach Planning Center to list event periods")
     response.raise_for_status()
-    now  = datetime.now(timezone.utc)
+    now  = datetime.now(UTC)
     data = []
     for ep in response.json()["data"]:
         starts_at = ep["attributes"].get("starts_at", "")
@@ -150,37 +216,63 @@ def get_recent_event_periods(event_id: str, weeks: int = 5) -> tuple:
     return period_ids, period_dates, period_starts_at
 
 
+def _parse_ts(raw: str) -> datetime | None:
+    """Parse a PCO ISO-8601 timestamp into an aware UTC datetime."""
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+
+
+def get_event_periods_since(event_id: str, since: date, tz=UTC,
+                            max_periods: int = 52) -> list[dict]:
+    """Return every period of `event_id` that has already started and falls on
+    or after `since` (compared as a local date in `tz`), oldest first.
+
+    Each item is {"id", "starts_at"} with starts_at as an aware datetime.
+    At most `max_periods` (the most recent ones) are returned, as a safety cap.
+    """
+    url    = f"{BASE_URL}/check-ins/v2/events/{event_id}/event_periods"
+    params = {"order": "-starts_at", "per_page": 100}
+    now    = datetime.now(UTC)
+    found: list[dict] = []
+    while url and len(found) < max_periods:
+        response = _get(url, params, label="event periods")
+        if response is None:
+            raise Exception("Could not reach Planning Center to list event periods")
+        response.raise_for_status()
+        body  = response.json()
+        older = False
+        for ep in body["data"]:
+            starts = _parse_ts(ep["attributes"].get("starts_at", ""))
+            if starts is None or starts > now:
+                continue
+            if starts.astimezone(tz).date() < since:
+                older = True
+                break
+            found.append({"id": ep["id"], "starts_at": starts})
+            if len(found) >= max_periods:
+                break
+        if older:
+            break
+        url    = body.get("links", {}).get("next")
+        params = None
+    found.sort(key=lambda p: p["starts_at"])
+    return found
+
+
 def _fetch_checkins_page(url: str, params: dict, page: int) -> dict:
     """Fetch one page of check-ins with retry logic. Returns the parsed JSON body."""
-    max_retries = 7
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, auth=_auth, params=params, timeout=60)
-        except (
-            requests.exceptions.SSLError,
-            requests.exceptions.ReadTimeout,
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-        ) as e:
-            wait = 2 ** attempt
-            print(f"  {type(e).__name__} — waiting {wait}s before retry ({attempt + 1}/{max_retries})...", flush=True)
-            time.sleep(wait)
-            continue
-        if response.status_code == 429:
-            wait = 2 ** attempt
-            for remaining in range(wait, 0, -1):
-                print(f"  Rate limited — retrying in {remaining}s...  ", end="\r", flush=True)
-                time.sleep(1)
-            print("  Rate limit wait done, retrying...          ", flush=True)
-            continue
-        if not response.ok:
-            print(
-                f"\n  HTTP {response.status_code} fetching page {page}: {response.text[:200]}",
-                flush=True,
-            )
-            response.raise_for_status()
-        return response.json()
-    raise Exception(f"Failed to fetch check-ins page {page} after {max_retries} retries.")
+    response = _get(url, params, label=f"check-ins page {page}")
+    if response is None:
+        raise Exception(f"Failed to fetch check-ins page {page} after {_MAX_RETRIES} retries.")
+    if not response.ok:
+        print(
+            f"\n  HTTP {response.status_code} fetching page {page}: {response.text[:200]}",
+            flush=True,
+        )
+        response.raise_for_status()
+    return response.json()
 
 
 _MAX_PAGES_PER_PERIOD = 30  # circuit breaker — a single period should never exceed ~3000 check-ins
@@ -227,91 +319,174 @@ def get_checkins_for_event_periods(event_id: str, event_period_ids: list) -> tup
     return all_checkins, all_included
 
 
-def get_person_details(person_id: str) -> dict:
-    """Fetch phone, address, birthday, and grade for one PCO person.
+def _primary(items: list) -> dict | None:
+    """Return the primary entry of a PCO contact list, else the first, else None."""
+    if not items:
+        return None
+    return next((i for i in items if i.get("primary")), items[0])
 
-    Results are cached by person_id. Retries up to 7 times on network errors
-    and 429 rate-limit responses using exponential back-off.
-    Returns an empty dict on permanent failure or 404.
+
+def _format_address(a: dict) -> str:
+    parts = filter(None, [
+        a.get("street_line_1") or a.get("street"), a.get("street_line_2"),
+        a.get("city"), a.get("state"), a.get("zip"),
+    ])
+    return ", ".join(parts)
+
+
+def person_details(attrs: dict) -> dict:
+    """Build the roster details for one Check-Ins Person (an `included` record's
+    attributes). No request is made — check-ins sideload all of this.
+    """
+    phone   = _primary(attrs.get("phone_numbers") or [])
+    address = _primary(attrs.get("addresses") or [])
+    grade_raw = attrs.get("grade")
+    return {
+        "phone":      phone.get("number", "") if phone else "",
+        "address":    _format_address(address) if address else "",
+        "birthday":   attrs.get("birthdate") or "",
+        "grade":      GRADE_MAP.get(grade_raw, "") if grade_raw is not None else "",
+        "grade_num":  grade_raw,
+        "gender":     attrs.get("gender") or "",
+        "created_at": attrs.get("created_at") or "",
+    }
+
+
+def get_person_details(person_id: str) -> dict:
+    """Fetch phone, address, birthday, and grade for one PCO person from the
+    People API. Used by the maintenance scripts; the roster pipeline reads the
+    same fields from sideloaded check-in data instead (see person_details).
+
+    Results are cached by person_id. Returns an empty dict on permanent failure or 404.
     """
     if person_id in _person_cache:
         return _person_cache[person_id]
 
     url      = f"{BASE_URL}/people/v2/people/{person_id}"
     params   = {"include": "emails,phone_numbers,addresses"}
-    max_retries = 7
-    response    = None
-
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, auth=_auth, params=params, timeout=60)
-        except (
-            requests.exceptions.SSLError,
-            requests.exceptions.ReadTimeout,
-            requests.exceptions.Timeout,
-            requests.exceptions.ConnectionError,
-        ) as e:
-            wait = 2 ** attempt
-            print(f"  {type(e).__name__} — waiting {wait}s before retry ({attempt + 1}/{max_retries})...", flush=True)
-            for remaining in range(wait, 0, -1):
-                print(f"  Retrying in {remaining}s...  ", end="\r", flush=True)
-                time.sleep(1)
-            print("  Retrying now...                   ", flush=True)
-            continue
-
-        if response.status_code == 404:
-            _person_cache[person_id] = {}
-            return {}
-        if response.status_code == 429:
-            wait = 2 ** attempt
-            for remaining in range(wait, 0, -1):
-                print(f"  Rate limited — retrying in {remaining}s...  ", end="\r", flush=True)
-                time.sleep(1)
-            print("  Rate limit wait done, retrying...          ", flush=True)
-            continue
-        response.raise_for_status()
-        break
-    else:
-        print(f"  Giving up on person {person_id} after {max_retries} retries.", flush=True)
+    response = _get(url, params, label=f"person {person_id}")
+    if response is None:
+        print(f"  Giving up on person {person_id} after {_MAX_RETRIES} retries.", flush=True)
         _person_cache[person_id] = {}
         return {}
+    if response.status_code == 404:
+        _person_cache[person_id] = {}
+        return {}
+    response.raise_for_status()
 
     body         = response.json()
     person_attrs = body["data"]["attributes"]
     included     = body.get("included", [])
 
-    phones    = [i for i in included if i["type"] == "PhoneNumber"]
-    addresses = [i for i in included if i["type"] == "Address"]
+    phones    = [i["attributes"] for i in included if i["type"] == "PhoneNumber"]
+    addresses = [i["attributes"] for i in included if i["type"] == "Address"]
 
-    primary_phone = next(
-        (p["attributes"]["number"] for p in phones if p["attributes"].get("primary")),
-        phones[0]["attributes"]["number"] if phones else "",
-    )
-
-    primary_address = ""
-    if addresses:
-        addr  = next((a for a in addresses if a["attributes"].get("primary")), addresses[0])
-        a     = addr["attributes"]
-        parts = filter(None, [
-            a.get("street_line_1"), a.get("street_line_2"),
-            a.get("city"), a.get("state"), a.get("zip"),
-        ])
-        primary_address = ", ".join(parts)
-
-    grade_raw = person_attrs.get("grade")
-    grade     = GRADE_MAP.get(grade_raw, "") if grade_raw is not None else ""
-
-    result = {
-        "phone":      primary_phone,
-        "address":    primary_address,
-        "birthday":   person_attrs.get("birthdate") or "",
-        "grade":      grade,
-        "grade_num":  grade_raw,                         # raw PCO integer, or None
-        "gender":     person_attrs.get("gender") or "",  # "Male" / "Female" / ""
-        "created_at": person_attrs.get("created_at") or "",
-    }
+    result = person_details({
+        **person_attrs,
+        "phone_numbers": phones,
+        "addresses":     addresses,
+    })
     _person_cache[person_id] = result
     return result
+
+
+_PEOPLE_BATCH = 100   # ids per where[id]= request — keeps URLs well under limits
+
+
+def _people_batch(ids: list[str], include: str) -> tuple[list, list]:
+    """Fetch People API records for `ids`, 100 per request.
+
+    PCO filters /people/v2/people by a comma-separated where[id] list, so a few
+    requests cover a whole roster. Returns (data, included) across all batches.
+    """
+    data: list = []
+    included: list = []
+    unique = list(dict.fromkeys(i for i in ids if i))
+    for start in range(0, len(unique), _PEOPLE_BATCH):
+        chunk  = unique[start:start + _PEOPLE_BATCH]
+        url    = f"{BASE_URL}/people/v2/people"
+        params = {"where[id]": ",".join(chunk), "per_page": _PEOPLE_BATCH, "include": include}
+        while url:
+            response = _get(url, params, label="people batch")
+            if response is None:
+                raise Exception("Could not reach Planning Center People")
+            response.raise_for_status()
+            body = response.json()
+            data.extend(body.get("data", []))
+            included.extend(body.get("included", []))
+            url    = body.get("links", {}).get("next")
+            params = None
+    return data, included
+
+
+def _related_ids(record: dict, rel: str) -> list[str]:
+    return [r["id"] for r in (record.get("relationships", {}).get(rel, {}).get("data") or [])]
+
+
+def _is_adult(attrs: dict) -> bool:
+    """True for a People record that is not flagged as a child and, when a
+    birthdate is known, is at least 18."""
+    if attrs.get("child"):
+        return False
+    birthdate = attrs.get("birthdate") or ""
+    return not birthdate or age_from_birthday(birthdate) >= 18
+
+
+def get_guardians(child_ids: list[str]) -> dict[str, dict]:
+    """Return {child_id: {"name", "phone", "address"}} for each child's parent.
+
+    The parent is the primary contact of the child's PCO household — the same
+    person Planning Center prints as "[P]" on its own roster reports. Two
+    batched passes: children → households, then primary contacts → phone and
+    address.
+
+    Only adults count. When parents don't attend, PCO sometimes makes an older
+    sibling the household's primary contact — that child is never shown as a
+    parent. Children with no adult primary contact are omitted.
+    """
+    if not child_ids:
+        return {}
+
+    kids, kid_included = _people_batch(child_ids, "households")
+    households = {i["id"]: i["attributes"] for i in kid_included if i["type"] == "Household"}
+
+    contact_for: dict[str, tuple[str, str]] = {}   # child → (contact id, contact name)
+    for kid in kids:
+        for hid in _related_ids(kid, "households"):
+            h   = households.get(hid) or {}
+            cid = str(h.get("primary_contact_id") or "")
+            if cid and cid != kid["id"]:
+                contact_for[kid["id"]] = (cid, h.get("primary_contact_name") or "")
+                break
+
+    contacts, contact_included = _people_batch(
+        [cid for cid, _ in contact_for.values()], "phone_numbers,addresses"
+    )
+    by_type_id = {(i["type"], i["id"]): i["attributes"] for i in contact_included}
+    details: dict[str, dict] = {}
+    for person in contacts:
+        attrs = person["attributes"]
+        if not _is_adult(attrs):
+            continue
+        details[person["id"]] = person_details({
+            **attrs,
+            "phone_numbers": [by_type_id[("PhoneNumber", i)] for i in _related_ids(person, "phone_numbers")
+                              if ("PhoneNumber", i) in by_type_id],
+            "addresses":     [by_type_id[("Address", i)] for i in _related_ids(person, "addresses")
+                              if ("Address", i) in by_type_id],
+        }) | {"name": attrs.get("name") or ""}
+
+    guardians: dict[str, dict] = {}
+    for kid_id, (cid, cname) in contact_for.items():
+        d = details.get(cid)
+        if d is None:          # a child, or not returned by PCO
+            continue
+        guardians[kid_id] = {
+            "name":    d.get("name") or cname,
+            "phone":   d.get("phone", ""),
+            "address": d.get("address", ""),
+        }
+    return guardians
 
 
 def get_locations(event_id: str) -> list:
@@ -320,7 +495,9 @@ def get_locations(event_id: str) -> list:
     Locations belong to the event (not a specific period), so this covers every period.
     """
     url      = f"{BASE_URL}/check-ins/v2/events/{event_id}/locations"
-    response = requests.get(url, auth=_auth, params={"per_page": 100})
+    response = _get(url, {"per_page": 100}, label="locations")
+    if response is None:
+        raise Exception("Could not reach Planning Center to list locations")
     response.raise_for_status()
     return [
         {"id": loc["id"], "name": loc["attributes"]["name"]}
@@ -346,7 +523,9 @@ def get_event_times(event_id: str, event_period_id: str) -> list:
     period and location IDs.
     """
     url      = f"{BASE_URL}/check-ins/v2/event_times"
-    response = requests.get(url, auth=_auth, params={"where[event_id]": event_id, "per_page": 100})
+    response = _get(url, {"where[event_id]": event_id, "per_page": 100}, label="event times")
+    if response is None:
+        raise Exception("Could not reach Planning Center to list event times")
     response.raise_for_status()
     times = []
     for et in response.json()["data"]:
@@ -360,65 +539,3 @@ def get_event_times(event_id: str, event_period_id: str) -> list:
                 "name":   attrs.get("name", ""),
             })
     return times
-
-
-def get_helpers_set(event_name: str, weeks: int = 5, min_age: int = 16) -> set:
-    """Return the set of person_ids aged `min_age`+ who checked into `event_name`
-    in the last `weeks` weeks.
-
-    `event_name` is the PCO Check-Ins event that identifies helpers/workers —
-    "Junta de Rutas Attendance" for the bus ministry. Reports that have no such
-    event should skip this call entirely rather than pass a name.
-
-    Results are cached per (event_name, weeks, min_age) so multiple reports in
-    one run only fetch a shared helpers event once. A missing event is not fatal:
-    it logs a warning and returns an empty set.
-    """
-    cache_key = (event_name, weeks, min_age)
-    if cache_key in _helpers_cache:
-        return _helpers_cache[cache_key]
-
-    print(f"  Fetching helpers ({event_name})...", flush=True)
-    try:
-        event_id = get_event_id(event_name)
-    except Exception as e:
-        print(f"  \u26a0 Could not find {event_name!r} event: {e}", flush=True)
-        return set()
-
-    try:
-        event_period_ids, _, _ = get_recent_event_periods(event_id, weeks=weeks)
-    except Exception as e:
-        print(f"  \u26a0 Could not fetch helpers event periods: {e}", flush=True)
-        return set()
-
-    try:
-        checkins, included = get_checkins_for_event_periods(event_id, event_period_ids)
-    except PaginationCircuitBreakerError:
-        raise
-    except Exception as e:
-        print(f"  \u26a0 Could not fetch helpers check-ins: {e}", flush=True)
-        return set()
-
-    # Collect all unique person_ids from the helpers event
-    candidates = set()
-    for checkin in checkins:
-        person_rel = checkin["relationships"].get("person", {}).get("data")
-        person_id = person_rel["id"] if person_rel else None
-        if person_id:
-            candidates.add(person_id)
-
-    # Filter by age — fetch each candidate's birthday and check age
-    helpers = set()
-    for i, person_id in enumerate(candidates, 1):
-        details = get_person_details(person_id)
-        birthday = details.get("birthday", "")
-        age = age_from_birthday(birthday)
-        if age >= min_age:
-            helpers.add(person_id)
-            print(f"    [{i}/{len(candidates)}] Helper: {person_id} (age {age})", flush=True)
-        else:
-            print(f"    [{i}/{len(candidates)}] Not helper: {person_id} (age {age})", flush=True)
-
-    _helpers_cache[cache_key] = helpers
-    print(f"  Found {len(helpers)} helpers.", flush=True)
-    return helpers

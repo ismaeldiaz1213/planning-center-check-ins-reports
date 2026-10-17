@@ -35,38 +35,49 @@ _ROOT      = os.path.dirname(_HERE)            # project root (one level up)
 LOGO_PATH  = os.path.join(_ROOT, "logo.png")
 ASSETS_DIR = os.path.join(_ROOT, "assets")    # theme image assets
 
+# ── Church locale ─────────────────────────────────────────────────────────────
+# Check-in timestamps arrive in UTC; arrival times and Sunday dates are shown in
+# the church's local time.
+CHURCH_TIMEZONE = os.getenv("CHURCH_TIMEZONE", "America/Chicago")
+
+# Video walkthrough linked (and QR-coded) on the Instrucciones.pdf cover page.
+CHECKIN_VIDEO_URL = os.getenv(
+    "CHECKIN_VIDEO_URL",
+    "https://drive.google.com/file/d/1yTSZM-FTPZHbKlRrMizAm06eUM-E6Mc4/view",
+)
+# Feedback form linked from every PDF — questions, confusion, ideas, venting.
+FEEDBACK_FORM_URL = os.getenv(
+    "FEEDBACK_FORM_URL",
+    "https://docs.google.com/forms/d/e/1FAIpQLSfSflUQmzCsL1TekFt_lQVCddGIInJw0QRoBjE8f6VrX0Hz6g/viewform",
+)
+# Who volunteers should find when the app can't sort something out.
+CHECKIN_HELP_CONTACT = os.getenv("CHECKIN_HELP_CONTACT", "Hna. Lira — cuarto de impresoras")
+
 # ── Page layout (landscape Letter = 792 × 612 pts) ───────────────────────────
 PAGE_W, PAGE_H = landscape(letter)
 MARGIN         = 36
 USABLE_W       = PAGE_W - 2 * MARGIN          # 720 pts
 
 HEADER_H       = 46    # height of the logo + title area
-ADDR_BAR_H     = 20    # height of the address-group bar
-COL_HDR_H      = 18    # height of the column header row
-ROW_H          = 18    # height of each data row
-MIN_EMPTY_ROWS = 5     # blank write-in rows appended to each address group
+COL_HDR_H      = 18    # height of a table's column header row
+ROW_H          = 17    # height of each data row
 FOOTER_H       = 24    # height of the footer area
-
-# ── Column definitions ────────────────────────────────────────────────────────
-# Address-grouped roster (Direcciones-Roster.pdf) — columns sum to 720 pts.
-# Order: visitor-marker | Nombre | Apellido | Cumpleaños | Teléfono | Grado | Apto. | Asist. | Dirección
-COL_WIDTHS = [16, 95, 95, 65, 90, 44, 44, 36, 235]
-HEADERS_ES = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Asist.", "Dirección"]
-
-# Simple alphabetical roster (Roster.pdf) — slightly wider name columns.
-SR_COL_WIDTHS = [16, 100, 100, 65, 95, 44, 44, 36, 220]
-SR_HEADERS    = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Asist.", "Dirección"]
-
-# Escuela Dominical roster — replaces Asist. (attendance) with Ruta (bus route).
-# Used when displaying Escuela Dominical rosters with route information.
-ED_COL_WIDTHS = [16, 100, 100, 65, 95, 44, 44, 50, 206]
-ED_HEADERS    = ["", "Nombre", "Apellido", "Cumpleaños", "Teléfono", "Grado", "Apto.", "Ruta", "Dirección"]
 
 # ── Fixed colours (never change with theme) ───────────────────────────────────
 WHITE       = colors.white
 GREY_LINE   = colors.HexColor("#CCCCCC")
-YELLOW_WARN = colors.HexColor("#FFF176")   # missing-data highlight
+YELLOW_WARN = colors.HexColor("#FFF3B0")   # missing-data highlight
 GOLD_STAR   = colors.HexColor("#F5A623")   # default visitor dot
+INK         = colors.HexColor("#1F2937")   # body text
+MUTED       = colors.HexColor("#6B7280")   # captions, secondary text
+TILE_BG     = colors.HexColor("#F5F7FA")   # stat-tile background
+
+# Status accents shared by every theme, so "good / watch / late" reads the same
+# whatever campaign is running.
+ACCENT_OK    = colors.HexColor("#2E7D32")  # early / new / healthy
+ACCENT_SOFT  = colors.HexColor("#3F9A45")  # a little early
+ACCENT_WARN  = colors.HexColor("#E08A00")  # slightly late / follow up
+ACCENT_LATE  = colors.HexColor("#C62828")  # late
 
 # ── Footer text ───────────────────────────────────────────────────────────────
 VERSE_TEXT     = os.getenv(

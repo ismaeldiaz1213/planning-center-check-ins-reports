@@ -3,8 +3,10 @@
 # Tests for the declarative report registry (planning_center_reports/reports.py):
 # schema validation, the no-config fallback, and report lookup.
 
+import dataclasses
 import os
 import textwrap
+from datetime import date
 
 import pytest
 import yaml
@@ -67,7 +69,9 @@ class TestMinimalSpec:
         """A church with no bus ministry must not be forced into route logic."""
         (spec,) = _parse(MINIMAL)
         assert spec.route_source_event is None
-        assert spec.helpers_event is None
+        assert spec.volunteer_report is False
+        assert spec.volunteer_event is None
+        assert spec.instructions is False
         assert spec.show_route is False
         assert spec.attendance_summary is False
         assert spec.drive_folder_prefix is None
@@ -75,8 +79,10 @@ class TestMinimalSpec:
     def test_defaults_to_a_single_alphabetical_roster(self):
         (spec,) = _parse(MINIMAL)
         assert spec.outputs == ("simple",)
-        assert spec.default_weeks == 5
+        assert spec.default_weeks == 6
         assert spec.default_theme is None
+        assert spec.start_date is None
+        assert spec.history_weeks == 26
 
     def test_subtitle_falls_back_to_label(self):
         (spec,) = _parse(MINIMAL)
@@ -136,8 +142,47 @@ class TestValidation:
         assert specs[0].id == "a"
 
     def test_a_single_output_string_is_accepted(self):
-        (spec,) = _parse(_with("outputs: address"))
-        assert spec.outputs == ("address",)
+        (spec,) = _parse(_with("outputs: simple"))
+        assert spec.outputs == ("simple",)
+
+    def test_the_retired_address_output_is_rejected(self):
+        with pytest.raises(ReportConfigError, match="unknown output"):
+            _parse(_with("outputs: [address, simple]"))
+
+    def test_the_retired_helpers_event_key_is_rejected(self):
+        """Workers now come from PCO's Volunteer tag; a stale key should say so loudly."""
+        with pytest.raises(ReportConfigError, match="unknown key"):
+            _parse(_with("helpers_event: Junta de Rutas Attendance"))
+
+    def test_bad_start_date_is_rejected(self):
+        with pytest.raises(ReportConfigError, match="start_date"):
+            _parse(_with('start_date: "August 23"'))
+
+    def test_out_of_range_history_weeks_is_rejected(self):
+        with pytest.raises(ReportConfigError, match="history_weeks"):
+            _parse(_with("history_weeks: 0"))
+
+
+# ── History window ────────────────────────────────────────────────────────────
+
+class TestHistory:
+    def test_yaml_date_and_string_both_parse(self):
+        (a,) = _parse(_with("start_date: 2026-08-23"))
+        (b,) = _parse(_with('start_date: "2026-08-23"'))
+        assert a.start_date == b.start_date == date(2026, 8, 23)
+
+    def test_start_date_wins_over_the_rolling_window(self):
+        (spec,) = _parse(_with("start_date: 2026-08-23", "history_weeks: 13"))
+        assert spec.history_start(date(2027, 3, 1)) == date(2026, 8, 23)
+
+    def test_rolling_window_covers_exactly_n_sundays(self):
+        """A quarter (13) back from a Monday must include 13 Sundays, not 14."""
+        (spec,) = _parse(_with("history_weeks: 13"))
+        start = spec.history_start(date(2026, 10, 19))      # a Monday
+        sundays = [start.toordinal() + i for i in range(200)
+                   if date.fromordinal(start.toordinal() + i).weekday() == 6
+                   and date.fromordinal(start.toordinal() + i) <= date(2026, 10, 19)]
+        assert len(sundays) == 13
 
 
 # ── Fallback when no config file exists ───────────────────────────────────────
@@ -154,8 +199,7 @@ class TestNoConfigFallback:
     def test_builtin_rutas_matches_the_original_pipeline(self):
         rutas = next(s for s in DEFAULT_REPORTS if s.id == "rutas")
         assert rutas.pco_event == "Rutas"
-        assert rutas.outputs == ("address", "simple")
-        assert rutas.helpers_event == "Junta de Rutas Attendance"
+        assert rutas.outputs == ("simple",)
         assert rutas.show_route is False
         assert rutas.attendance_summary is False
 
@@ -203,7 +247,7 @@ class TestDerivedValues:
 
     def test_resolved_weeks_ignores_an_out_of_range_override(self, monkeypatch):
         monkeypatch.setenv("ESCUELA_B_DEFAULT_WEEKS", "99")
-        assert get_report("escuela-b").resolved_weeks() == 5
+        assert get_report("escuela-b").resolved_weeks() == 6
 
     def test_resolved_theme_ignores_an_unknown_override(self, monkeypatch):
         monkeypatch.setenv("RUTAS_DEFAULT_THEME", "bogus")
@@ -216,7 +260,7 @@ class TestDerivedValues:
         }
 
     def test_spec_is_immutable(self):
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             get_report("rutas").label = "changed"
 
     def test_every_output_kind_has_a_filename(self):
@@ -233,7 +277,16 @@ class TestShippedConfig:
         assert spec.pco_event == '"B" Escuela Dominical'
         assert spec.show_route is True
         assert spec.attendance_summary is True
-        assert spec.helpers_event == "Junta de Rutas Attendance"
+        assert spec.volunteer_report is True
+        assert spec.instructions is True
+        assert spec.start_date == date(2026, 8, 23)
+
+    def test_rutas_uses_a_rolling_quarter_and_the_junta_for_volunteers(self):
+        spec = get_report("rutas")
+        assert spec.start_date is None
+        assert spec.history_weeks == 13
+        assert spec.volunteer_event == "Junta de Rutas Attendance"
+        assert spec.volunteer_min_age == 16
 
     def test_escuela_b_uploads_under_its_own_folder(self):
         """Its class names may collide with the A session's — the prefix keeps them apart."""

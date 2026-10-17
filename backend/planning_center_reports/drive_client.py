@@ -101,3 +101,35 @@ def upload_and_replace(service, folder_id: str, local_path: str, drive_name: str
             media_body=media,
             supportsAllDrives=True,
         ).execute()
+
+
+def upload_if_changed(service, folder_id: str, local_path: str, drive_name: str,
+                      fingerprint: str) -> bool:
+    """Upload `local_path` as `drive_name` unless the copy already in `folder_id`
+    carries the same `fingerprint` (stored in the file's appProperties).
+
+    Returns True if a file was uploaded. Used for files that rarely change, such
+    as Instrucciones.pdf, so a weekly run doesn't rewrite dozens of identical copies.
+    """
+    query   = f"name='{_escape(drive_name)}' and '{folder_id}' in parents and trashed=false"
+    results = service.files().list(
+        q=query, fields="files(id, appProperties)",
+        supportsAllDrives=True, includeItemsFromAllDrives=True,
+    ).execute()
+    files = results.get("files", [])
+    if files and (files[0].get("appProperties") or {}).get("fingerprint") == fingerprint:
+        return False
+
+    media = MediaFileUpload(local_path, mimetype="application/pdf")
+    props = {"appProperties": {"fingerprint": fingerprint}}
+    if files:
+        service.files().update(
+            fileId=files[0]["id"], body=props, media_body=media, supportsAllDrives=True
+        ).execute()
+    else:
+        service.files().create(
+            body={"name": drive_name, "parents": [folder_id], **props},
+            media_body=media,
+            supportsAllDrives=True,
+        ).execute()
+    return True

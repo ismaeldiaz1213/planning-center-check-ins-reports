@@ -52,13 +52,15 @@ See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough,
 
 ## Features
 
-- **Configurable reports** — define any number of Check-Ins events in `reports.yaml`; bus routes, helper detection, and attendance summaries are optional per report, so a church without a bus ministry never sees a `Ruta` column
-- **Two roster types per bus route** — address-grouped PDF for secretaries, clean alphabetical list for drivers
-- **Sunday school rosters** — one per class with grade, attendance rate, and bus route column
-- **Attendance summary tables** — per-Sunday regular/visitor counts and per-route headcount
+- **Configurable reports** — define any number of Check-Ins events in `reports.yaml`; bus routes, volunteer reports, and instructions are optional per report, so a church without a bus ministry never sees a `Ruta` column
+- **Full-history rosters** — each class looks back to back-to-school Sunday (or a rolling window, e.g. a quarter for bus routes): **date added**, attendance dots, a **"Hace tiempo que no viene"** follow-up list of people who stopped coming, and a **Resumen** with per-Sunday numbers
+- **Parents on the roster** — each kid's household contact (adults only), with phone and address
+- **Workers table** — whoever Planning Center tags as *Volunteer*, kept apart from the kids
+- **Volunteer attendance sheet** — who served each Sunday last month and when they checked in
+- **Instrucciones.pdf** — bilingual check-in guide with a QR code to the video, next to every roster
+- **Feedback form** — linked from every page, with a QR code for printed copies
 - **Yellow highlights** for missing data (phone, birthday, address, grade)
-- **Visitor dot** — gold circle marks people added to PCO within the last 7 days
-- **Attendance rate** — shows how many of the last N weeks each person attended (e.g. `3/5`)
+- **Fast and light on Planning Center** — contact details come with the check-ins; parents are a batched lookup; every report runs in one weekly job in under a minute
 - **Campaign themes** — seasonal colour schemes for special events
 - **Web UI** — dashboard for triggering jobs, previewing PDFs, editing settings, and viewing logs
 - **Demo mode** — deploy a public `DEMO_MODE=true` instance so developers can evaluate the app without credentials
@@ -71,36 +73,29 @@ See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough,
 
 ## PDF Output
 
-### Bus Routes (Rutas)
-
-Each bus route folder in Google Drive receives two PDFs every week:
+Every class and bus route folder in Google Drive receives:
 
 | File | Description |
 |------|-------------|
-| `Direcciones-Roster.pdf` | People grouped by apartment complex, sorted by unit number. Includes empty writable rows for walk-ins. |
-| `Roster.pdf` | Clean alphabetical list sorted by last name. Good for drivers. |
+| `Roster.pdf` | **Lista** (with parents, date added and attendance), **Maestros y ayudantes**, **Hace tiempo que no viene** (follow-up list) and a **Resumen** (per-Sunday counts, kids per route). |
+| `Instrucciones.pdf` | Bilingual check-in guide; re-uploaded only when it changes. |
 
-### Sunday School (Escuela Dominical)
-
-Each class location receives:
-
-| File | Description |
-|------|-------------|
-| `Roster.pdf` | Alphabetical roster with grade, bus route number, attendance rate, and visitor indicators. Includes attendance summary tables at the bottom. |
+Each report also gets `Voluntarios/<report>/Voluntarios.pdf` — volunteer attendance and check-in times over the
+last 4 Sundays. See [docs/reports.md](docs/reports.md#what-each-report-produces).
 
 ### Column Reference
 
 | Column | Notes |
 |--------|-------|
-| ● / ⚽ | Visitor marker — gold dot by default; soccer ball PNG for the `primavera` theme |
-| Nombre / Apellido | First and last name |
+| ★ / ⚽ | First time this Sunday — gold star by default; soccer ball PNG for the `primavera` theme |
+| Nombre / Apellido | First and last name; kids get a **Padre/Tutor** line underneath |
 | Cumpleaños | Birthday in MM/DD/YYYY format |
 | Teléfono | Primary phone number |
 | Grado | PCO grade field; auto-filled as Nursery / 3 años / 4 años for children under 5 |
-| Apto. | Apartment number extracted from address |
-| Ruta | Bus route number — Sunday school rosters only; blank for helpers |
-| Asist. | Attendance rate over the selected window (e.g. `4/5`) |
-| Dirección | Street address without apartment number |
+| Ruta | Bus route most recently ridden — Sunday school rosters only |
+| Asistencia | One dot per Sunday in the active window; filled = present |
+| Agregado | First Sunday in this class (green if recent; blank = regular since the start) |
+| Dirección | Address without state/ZIP |
 
 **Yellow highlighting** means the cell is missing or incomplete — phone, birthday, grade (for minors), and bad/city-only addresses all trigger this.
 

@@ -10,7 +10,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import api
-from api import _jobs, _jobs_lock, app, _read_dotenv, _write_dotenv, _get_allowed_origins, _DEV_ORIGINS
+from api import _DEV_ORIGINS, _get_allowed_origins, _jobs, _jobs_lock, _read_dotenv, _write_dotenv, app
 
 client = TestClient(app)
 
@@ -215,7 +215,7 @@ class TestRunRutas:
         cmd = mock_run.call_args[0][1]
         assert "rutas" in cmd          # report id, resolved back to the PCO event by cli.py
         assert "--weeks" in cmd
-        assert "5" in cmd  # default weeks
+        assert "6" in cmd  # default weeks
 
     @patch("api._run_subprocess")
     def test_command_uses_env_default_weeks(self, mock_run, monkeypatch):
@@ -311,13 +311,13 @@ class TestGetSettings:
         assert data["pco_secret"] == "sec-456"
         assert data["google_drive_parent_folder_id"] == "folder-789"
 
-    def test_defaults_weeks_to_5_when_unset(self, monkeypatch):
+    def test_defaults_weeks_to_6_when_unset(self, monkeypatch):
         monkeypatch.delenv("RUTAS_DEFAULT_WEEKS", raising=False)
         monkeypatch.delenv("ESCUELA_DEFAULT_WEEKS", raising=False)
         resp = client.get("/api/settings")
         reports = resp.json()["reports"]
-        assert reports["rutas"]["weeks"] == 5
-        assert reports["escuela"]["weeks"] == 5
+        assert reports["rutas"]["weeks"] == 6
+        assert reports["escuela"]["weeks"] == 6
 
     def test_reads_custom_weeks_from_env(self, monkeypatch):
         monkeypatch.setenv("RUTAS_DEFAULT_WEEKS", "7")

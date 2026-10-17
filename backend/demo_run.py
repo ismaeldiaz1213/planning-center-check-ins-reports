@@ -5,8 +5,8 @@ demo_run.py — called by api.py when DEMO_MODE=true instead of main.py.
 Simulates a realistic roster job for any configured report using mock data.
 Generates real PDFs and saves them to backend/previews/; skips Google Drive.
 
-Which log lines appear, whether the Ruta column is drawn, and whether attendance
-summary tables are included all come from the report's spec in reports.yaml —
+Which log lines appear, whether the Ruta column is drawn, and whether the
+volunteer report is generated all come from the report's spec in reports.yaml —
 so a newly configured report gets a working demo with no changes here.
 
 Usage (for manual testing):
@@ -18,9 +18,15 @@ import time
 from pathlib import Path
 
 import planning_center_reports.config as _cfg
-from planning_center_reports.mock_data import MOCK_ATTENDEES, MOCK_SUNDAY_DATA
-from planning_center_reports.pdf.rosters import generate_address_pdf, generate_simple_roster_pdf
-from planning_center_reports.reports import OUTPUT_FILENAMES, ReportConfigError, get_report
+from planning_center_reports.mock_data import MOCK_ATTENDEES, mock_roster, mock_volunteers
+from planning_center_reports.pdf.rosters import generate_roster_pdf
+from planning_center_reports.pdf.volunteers import generate_volunteer_pdf
+from planning_center_reports.reports import (
+    OUTPUT_FILENAMES,
+    VOLUNTEERS_FILENAME,
+    ReportConfigError,
+    get_report,
+)
 
 
 def _log(msg: str) -> None:
@@ -68,12 +74,6 @@ def main() -> None:
     _log(f"Locations to process: {locations}")
     time.sleep(0.3)
 
-    if spec.helpers_event:
-        _log(f"Fetching helpers ({spec.helpers_event})...")
-        time.sleep(0.5)
-        _log("  Found 1 helper")
-        time.sleep(0.3)
-
     if spec.route_source_event:
         _log(f"  Building route mappings from {spec.route_source_event} check-ins...")
         time.sleep(0.4)
@@ -81,31 +81,23 @@ def main() -> None:
         time.sleep(0.2)
 
     for loc in locations:
-        # For the bus-route demo each location shows only its own riders;
-        # class-style reports show the whole mock roster.
-        attendees = [a for a in MOCK_ATTENDEES if a.get("route") == loc]
-        if not attendees:
-            attendees = MOCK_ATTENDEES
-
-        _log(f"Processing {loc} ({len(attendees)} attendees)...")
+        roster = mock_roster(loc, spec.show_route)
+        _log(f"Generating {loc} ({len(roster.active)} on the list, "
+             f"{roster.new_this_week} new this week, {len(roster.inactive)} hace tiempo)...")
         time.sleep(0.3)
         slug = loc.replace(" ", "_").replace("/", "-").replace('"', "")
-
-        for kind in spec.outputs:
-            filename = OUTPUT_FILENAMES[kind]
-            path = str(out_dir / f"demo_{slug}_{filename}")
-            if kind == "address":
-                generate_address_pdf(loc, attendees, path)
-            else:
-                generate_simple_roster_pdf(
-                    loc, spec.pdf_subtitle, attendees, path,
-                    show_route=spec.show_route,
-                    sunday_data=MOCK_SUNDAY_DATA if spec.attendance_summary else None,
-                )
-            _log(f"  ✓ {filename} saved")
-
+        filename = OUTPUT_FILENAMES["simple"]
+        generate_roster_pdf(roster, spec.pdf_subtitle, str(out_dir / f"demo_{slug}_{filename}"),
+                            show_route=spec.show_route, attendance_summary=spec.attendance_summary)
+        _log(f"  ✓ {filename} saved")
         _log("  [DEMO MODE] Skipping Google Drive upload")
         time.sleep(0.2)
+
+    if spec.volunteer_report:
+        _log("Building volunteer arrival report...")
+        generate_volunteer_pdf(mock_volunteers(), spec.label,
+                               str(out_dir / f"demo_{spec.id}_{VOLUNTEERS_FILENAME}"))
+        _log(f"  ✓ {VOLUNTEERS_FILENAME} saved")
 
     elapsed = time.time() - t_start
     _log(f"\nDone in {elapsed:.1f}s")

@@ -14,6 +14,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Richer `Roster.pdf`**, same plain layout — attendance dots instead of `3/5`; a **date
+  added** column (first Sunday in the class, green when recent); a **Padre/Tutor** line under
+  each kid; a **Maestros y ayudantes** table; a **Hace tiempo que no viene** follow-up list
+  with weeks absent and last-seen date; and a **Resumen** at the end (average per Sunday,
+  recently added, attendance per Sunday, kids per route).
+- **History windows** — `start_date` (back-to-school Sunday) or rolling `history_weeks`
+  (Rutas uses a quarter, 13). `default_weeks` is now the active window (default 6).
+- **Parents** — each kid's PCO household primary contact, in two batched People API calls.
+  Only adults are shown; a sibling listed as head of household never appears as a parent.
+- **`Voluntarios.pdf`** (`volunteer_report`) — who served each of the last 4 Sundays and
+  their check-in time, with per-Sunday totals; uploaded to `Voluntarios/<report>/`. No
+  early/late judgement — staff read the numbers. Rutas uses the Junta de Rutas meeting
+  (`volunteer_event`, everyone 16+).
+- **`Instrucciones.pdf`** (`instructions`) — bilingual cover (3 steps, video QR, quick
+  reference) plus the full Spanish and English guides, in every location folder; re-uploaded
+  only when its content changes.
+- **Feedback form** linked from every page and QR-coded at the end of every PDF
+  (`FEEDBACK_FORM_URL`).
+- **`main.py --all`** — every report in one process with shared PCO data; `manage.sh` now
+  deploys a single scheduled `roster-weekly` job (per-report jobs stay for one-off runs), and
+  option 25 switches the active gcloud project.
+
+
 - **`backend/backfill_bus_class.py`** (`make backfill-bus-class`) — seeds the `"C" Escuela
   Dominical` classes by checking every bus rider (grade 7–12, under 20) who also attends the
   regular Escuela Dominical into their class for the most recent Sunday, so Check-Ins pre-select suggests it. Class comes from People grade +
@@ -178,6 +201,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **No per-person API calls.** Contact details come from the person sideloaded on each
+  check-in, so a weekly run of all reports takes ~130 PCO requests and under a minute
+  (previously ~40 minutes of job time across four jobs).
+- Every PCO request is paced under the 100-per-20-seconds limit and honours `Retry-After`.
+- Workers are whoever PCO tags as *Volunteer*; `helpers_event` / `helper_min_age` are removed.
+- CI: ruff is pinned (`ruff==0.17.1`) with an explicit rule set, so a ruff release can't
+  break the build.
 - `POST /api/jobs/rutas/run` and `/api/jobs/escuela/run` are now the generic
   `POST /api/jobs/{report_id}/run`. Because the report ids are `rutas` and `escuela`, the
   existing URLs are unchanged.
@@ -240,11 +270,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `run_rutas` / `run_escuela_dominical` log now shows only the locations that will actually be
   processed (filtered set) rather than every location that appeared in the API sideload.
 
+### Removed
+
+- `Direcciones-Roster.pdf` (the `address` output) — unused.
+
 ### Kept for compatibility
 
-- `services.run_rutas()` and `services.run_escuela_dominical()` remain as thin wrappers over
-  `run_report(get_report(...))`.
-
+- `python main.py "Escuela Dominical"` and the other PCO-event-name arguments still resolve to
+  their report. (The `services.run_rutas()` / `run_escuela_dominical()` wrappers had no
+  remaining callers and were removed.)
 
 ### Security
 

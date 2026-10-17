@@ -9,23 +9,35 @@
 # are used, so an existing install needs no changes.
 #
 # Every optional feature defaults to OFF. A church with no bus ministry simply
-# leaves `route_source_event` and `helpers_event` unset and those Planning
+# leaves `route_source_event` and `volunteer_event` unset and those Planning
 # Center events are never contacted. Full schema: docs/reports.md
 #
 # Required : id, label, pco_event
-# Optional : subtitle, icon, enabled, outputs, helpers_event, helper_min_age,
-#            route_source_event, show_route, attendance_summary,
-#            drive_folder_prefix, default_weeks, default_theme, demo_locations
+# History  : start_date (fixed first Sunday) or history_weeks (rolling window);
+#            default_weeks is the "active" window — older attendees move to
+#            the "Hace tiempo" follow-up list
+# Optional : subtitle, icon, enabled, outputs, route_source_event, show_route,
+#            attendance_summary, instructions, volunteer_report, volunteer_event,
+#            volunteer_min_age, volunteer_weeks, drive_folder_prefix,
+#            default_theme, max_history_weeks, demo_locations
 
 reports:
   # ── Bus routes ──────────────────────────────────────────────────────────────
+  # Routes run all year and carry adults too, so they use a rolling quarter
+  # instead of the school-year start date.
   - id: rutas
     label: Rutas
     pco_event: Rutas                            # exact PCO Check-Ins event name
     icon: "🚌"
     subtitle: Ministerio de Autobuses
-    outputs: [address, simple]                  # Direcciones-Roster.pdf + Roster.pdf
-    helpers_event: Junta de Rutas Attendance    # bus workers, age 16+
+    history_weeks: 13                           # rolling quarter
+    default_weeks: 6
+    instructions: true
+    # Bus workers aren't tagged at their own meeting, so their attendance comes
+    # from everyone 16+ who checked into it.
+    volunteer_report: true
+    volunteer_event: Junta de Rutas Attendance
+    volunteer_min_age: 16
     demo_locations: ["Ruta 1 - Bus", "Ruta 2 - Van", "Ruta 3 - Carro"]
 
   # ── Sunday school ───────────────────────────────────────────────────────────
@@ -33,11 +45,13 @@ reports:
     label: Escuela Dominical
     pco_event: Escuela Dominical
     icon: "📚"
-    outputs: [simple]
-    helpers_event: Junta de Rutas Attendance
+    start_date: 2026-08-23                      # back-to-school Sunday
+    default_weeks: 6
     route_source_event: Rutas                   # where the "Ruta" column comes from
     show_route: true
-    attendance_summary: true                    # per-Sunday + per-route tables
+    attendance_summary: true                    # per-route breakdown
+    instructions: true
+    volunteer_report: true                      # teachers tagged "Volunteer" in PCO
     demo_locations: ["Clase Primaria", "Clase Secundaria"]
 
   # ── Second Sunday school session ────────────────────────────────────────────
@@ -45,19 +59,21 @@ reports:
     label: '"C" Escuela Dominical'
     pco_event: '"C" Escuela Dominical'
     icon: "📗"
-    outputs: [simple]
-    helpers_event: Junta de Rutas Attendance
+    start_date: 2026-09-27                     # first C roster run (migration)
+    default_weeks: 6
     route_source_event: Rutas
     show_route: true
     attendance_summary: true
-    # Keeps C's class folders from colliding with A's in Google Drive.
+    instructions: true
+    volunteer_report: true
+    # Keeps this session's class folders from colliding with A's in Google Drive.
     drive_folder_prefix: '"C" Escuela Dominical'
     demo_locations: ['"C" 7th Boys', '"C" 8th Girls']
 
   # ── Example: a church with no bus ministry ──────────────────────────────────
-  # Nothing but the roster — no Ruta column, no helper lookup, no summary.
+  # Nothing but the roster — no Ruta column, no volunteer report.
   # - id: ninos
   #   label: Clases de Niños
   #   pco_event: Clases de Niños
   #   icon: "🧒"
-  #   outputs: [simple]
+  #   start_date: 2026-08-23
