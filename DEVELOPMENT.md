@@ -168,6 +168,31 @@ until it prints nothing.
 ruff check . && pytest
 ```
 
+### Run the platform locally (Advanced Reports)
+
+`advanced_reports/` is the multi-church platform around the engine. To try it on your own
+machine, with no Planning Center OAuth app or Google Cloud project:
+
+```bash
+cd backend
+AR_DEV_LOGIN=1 uvicorn advanced_reports.app:create_app --factory --port 8000
+# then open http://localhost:8000
+```
+
+`AR_DEV_LOGIN=1` adds two sign-in buttons that skip Planning Center sign-in:
+
+- **Grace Community Church**: a made-up English church (`advanced_reports/demo.py`). No
+  network, no real people.
+- **Iglesia Bautista Libertad**: shown only when `.env` has `PCO_APP_ID` / `PCO_SECRET`.
+  It imports `.env` + `reports.yaml` as a church and reads live Planning Center data.
+  Nothing is uploaded to Google Drive; the PDFs stay on this machine.
+
+Everything it stores goes under `out/platform-data/` (gitignored): settings and run history
+as JSON, the Planning Center token encrypted, and each run's PDFs. Delete that folder to
+start over. Never set `AR_DEV_LOGIN` on a deployed server.
+
+Tests: `pytest tests/platform`.
+
 ### Generate PDF previews (no credentials needed)
 
 ```bash

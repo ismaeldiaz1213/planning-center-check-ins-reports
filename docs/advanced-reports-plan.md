@@ -45,11 +45,55 @@ _Last updated: 2026-11-14 (Saturday, late; session paused mid step 3)_
 | Working branch | `feat/platform-m1`, branched from `chore/dependency-bumps` at the owner's request (see "Branch" below) |
 | Milestone 1 step 1: golden tests | ✅ Done 2026-11-14 (`backend/tests/golden/`) |
 | Milestone 1 step 2: benchmark baseline | 🟡 Local and render baselines recorded in `docs/benchmarks.md`. Production baseline (real `roster-weekly` runs), image size and cold start still missing. |
-| Milestone 1 step 3: engine refactor | 🟡 **Code and tests done 2026-11-14** (375 tests pass, golden snapshots untouched). One check left: a live dry run against IBL, which needs the owner's go-ahead. See "Step 3" below. |
-| Milestone 1 steps 4–7 | ⬜ Not started; steps 6–7 are blocked on the accounts above |
+| Milestone 1 step 3: engine refactor | ✅ Done 2026-11-14. Verified live: a dry run of the refactored engine produced the same 105 files with identical text to the baseline, in 134 requests. |
+| Milestone 1 step 4: platform core | 🟡 **Runs locally** (`backend/advanced_reports/`). Not built: Firestore store, Google Drive connection, scheduler/dispatch. Planning Center OAuth is written but has never met the real service. See "Steps 4–5" below. |
+| Milestone 1 step 5: minimal dashboard | 🟡 Working single page served by the API (sign in, run now, files, history, church settings, disconnect; English/Spanish). It is plain HTML/JS, not the React app, and reports are shown read-only. |
+| Milestone 1 steps 6–7 | ⬜ Not started; blocked on the accounts above |
 | Milestones 2–5 | ⬜ Not started |
 
-**Next action:** owner approves one live `main.py --all --dry-run` (read-only, no upload) to close step 3; then step 4 (platform core). Production baseline still needs `gcloud auth login`.
+**Next action:** owner creates the Planning Center OAuth app and the GCP projects (§7); then the Firestore store, Google Drive connection, dispatch, `Dockerfile.app` and deploy. Production baseline still needs `gcloud auth login` on the **IBL** account.
+
+### Steps 4–5: platform running locally (2026-11-14)
+
+Try it: `cd backend && AR_DEV_LOGIN=1 .venv/bin/uvicorn advanced_reports.app:create_app
+--factory --port 8000`, open `http://localhost:8000`. Details in `DEVELOPMENT.md`.
+
+**What works, checked by running it:**
+- Two churches in one service: a made-up English church (`demo.py`, no network) and IBL
+  (imported from `.env` + `reports.yaml` by `importers/ibl.py`, live Planning Center data).
+- **IBL through the platform produced the same output as the old job:** 105 files, same
+  folder tree, identical extracted text to `out/baseline-2026-11-14/`, 134 requests, 46 s.
+- Run now starts `advanced_reports/runner.py` as its own process (one execution, one
+  church); the run record gets status, log, files, timings and request counts; PDFs open
+  from the dashboard.
+- IBL's Planning Center token is stored encrypted (envelope encryption, §3.5); a scan of
+  the data folder found it nowhere in plain text.
+- 59 platform tests (`tests/platform/`), including the §3.7 two-church checks: list, read,
+  download, change, run and disconnect across churches are all refused; forged, swapped
+  and expired session cookies are refused; a secret copied into another church's record
+  does not decrypt; disconnect leaves no documents or files.
+
+**Deliberate shortcuts for tonight, each one a gap:**
+- **Sign-in is a development bypass** (`AR_DEV_LOGIN=1`), not Planning Center OAuth. The
+  OAuth routes and token refresh exist (`core/pco_oauth.py`) but no OAuth app is
+  registered, so they have only run against a stand-in. Which Planning Center field marks
+  an organization administrator is a guess (`site_administrator`); §8 still applies.
+- **Storage is JSON files** under `out/platform-data/` (`FileStore`), not Firestore. The
+  `Store` interface is four methods; the Firestore version is not written.
+- **PDFs stay on the server** in the church's run folder. No Google connection, no Drive
+  upload, so the Drive-folder decision is still open and nothing reaches teachers.
+- **IBL is church `dev-ibl`** using its Personal Access Token, not its real Planning Center
+  organization id. A real cutover needs OAuth sign-in and a re-import under the real id.
+- **No schedule**: no `/internal/dispatch`, no Cloud Scheduler. Runs start by button only.
+- **Dashboard is one HTML file** (`advanced_reports/static/index.html`), not the React app
+  on Firebase Hosting. Reports are read-only; there is no wizard or template picker.
+- The one-run-at-a-time check is read-then-write, not a transaction; two clicks in the
+  same instant could start two runs. Fine for one user locally, not for production.
+- CSRF protection is a required custom header plus a SameSite cookie. No rate limiting.
+- No `Dockerfile.app`, nothing deployed, no logo upload (IBL's logo is copied by the importer).
+- Run logs still contain a few Spanish words from the engine's console messages
+  ("hace tiempo") even for English churches. PDFs are unaffected.
+
 
 ### Step 3: engine refactor (code done 2026-11-14)
 

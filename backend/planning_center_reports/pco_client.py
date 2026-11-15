@@ -327,6 +327,23 @@ class PcoClient:
             params = None  # the "next" link already carries per_page/offset
         raise Exception(f"Event '{event_name}' not found")
 
+    def list_events(self) -> list[dict]:
+        """Every Check-Ins event as {"id", "name", "archived"}, in Planning Center's order."""
+        url    = f"{self.base_url}/check-ins/v2/events"
+        params = {"per_page": 100}
+        events: list[dict] = []
+        while url:
+            response = self._get(url, params, label="event list")
+            if response is None:
+                raise Exception("Could not reach Planning Center to list events")
+            response.raise_for_status()
+            body = response.json()
+            events += [{"id": e["id"], "name": e["attributes"]["name"],
+                        "archived": bool(e["attributes"].get("archived_at"))} for e in body["data"]]
+            url    = body.get("links", {}).get("next")
+            params = None
+        return events
+
     def get_recent_event_periods(self, event_id: str, weeks: int = 5) -> tuple:
         """Return (period_ids, period_dates, period_starts_at) for the `weeks` most recent
         periods that have already happened (starts_at in the past).
