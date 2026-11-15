@@ -11,15 +11,16 @@ from datetime import date
 import pytest
 import yaml
 
+from planning_center_reports import legacy
+from planning_center_reports.legacy import get_report, load_reports
 from planning_center_reports.reports import (
-    DEFAULT_REPORTS,
-    OUTPUT_FILENAMES,
+    OUTPUT_KINDS,
     ReportConfigError,
     ReportSpec,
-    get_report,
-    load_reports,
     parse_reports,
 )
+
+DEFAULT_REPORTS = legacy.default_reports()
 
 
 @pytest.fixture(autouse=True)
@@ -191,7 +192,7 @@ class TestNoConfigFallback:
     def test_falls_back_to_builtin_defaults(self, monkeypatch, tmp_path):
         """An install that never adds a reports.yaml keeps the original behaviour."""
         monkeypatch.delenv("REPORTS_CONFIG", raising=False)
-        monkeypatch.setattr("planning_center_reports.reports.config_path", lambda: None)
+        monkeypatch.setattr("planning_center_reports.legacy.config_path", lambda: None)
         specs = load_reports(refresh=True)
         assert specs == DEFAULT_REPORTS
         assert [s.id for s in specs] == ["rutas", "escuela"]
@@ -239,22 +240,22 @@ class TestGetReport:
 
 class TestDerivedValues:
     def test_env_prefix_underscores_hyphens(self):
-        assert get_report("escuela-b").env_prefix == "ESCUELA_B"
+        assert legacy.env_prefix(get_report("escuela-b")) == "ESCUELA_B"
 
     def test_resolved_weeks_prefers_the_env_override(self, monkeypatch):
         monkeypatch.setenv("ESCUELA_B_DEFAULT_WEEKS", "9")
-        assert get_report("escuela-b").resolved_weeks() == 9
+        assert legacy.resolved_weeks(get_report("escuela-b")) == 9
 
     def test_resolved_weeks_ignores_an_out_of_range_override(self, monkeypatch):
         monkeypatch.setenv("ESCUELA_B_DEFAULT_WEEKS", "99")
-        assert get_report("escuela-b").resolved_weeks() == 6
+        assert legacy.resolved_weeks(get_report("escuela-b")) == 6
 
     def test_resolved_theme_ignores_an_unknown_override(self, monkeypatch):
         monkeypatch.setenv("RUTAS_DEFAULT_THEME", "bogus")
-        assert get_report("rutas").resolved_theme() is None
+        assert legacy.resolved_theme(get_report("rutas")) is None
 
     def test_public_dict_hides_pco_event_names(self):
-        data = get_report("escuela-b").public_dict()
+        data = legacy.public_dict(get_report("escuela-b"))
         assert set(data) == {
             "id", "label", "icon", "outputs", "show_route", "default_weeks", "default_theme"
         }
@@ -266,7 +267,7 @@ class TestDerivedValues:
     def test_every_output_kind_has_a_filename(self):
         for spec in load_reports():
             for kind in spec.outputs:
-                assert kind in OUTPUT_FILENAMES
+                assert kind in OUTPUT_KINDS
 
 
 # ── The shipped example config ────────────────────────────────────────────────

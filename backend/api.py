@@ -28,12 +28,9 @@ from google.auth.transport import requests as _google_requests
 from google.oauth2 import id_token as _google_id_token
 from pydantic import BaseModel, Field
 
-from planning_center_reports.reports import (
-    VALID_THEMES,
-    ReportConfigError,
-    enabled_reports,
-    get_report,
-)
+from planning_center_reports import legacy  # also loads .env, as the old config import did
+from planning_center_reports.legacy import enabled_reports, get_report
+from planning_center_reports.reports import VALID_THEMES, ReportConfigError
 
 # ── Demo mode ─────────────────────────────────────────────────────────────────
 # Set DEMO_MODE=true to serve a public demo: auth is bypassed, job runs use
@@ -309,7 +306,7 @@ def get_job(job_id: str, since: int = Query(default=0, ge=0), _: dict = Depends(
 def list_reports(_: dict = Depends(_verify_google_token)):
     """Return the reports configured in reports.yaml, for the dashboard tiles."""
     try:
-        return {"reports": [spec.public_dict() for spec in enabled_reports()]}
+        return {"reports": [legacy.public_dict(spec) for spec in enabled_reports()]}
     except ReportConfigError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -323,8 +320,8 @@ def get_settings(_: dict = Depends(_verify_google_token)):
 
     reports: dict[str, dict] = {}
     for spec in enabled_reports():
-        raw_weeks = _get(f"{spec.env_prefix}_DEFAULT_WEEKS", "")
-        raw_theme = _get(f"{spec.env_prefix}_DEFAULT_THEME", "")
+        raw_weeks = _get(f"{legacy.env_prefix(spec)}_DEFAULT_WEEKS", "")
+        raw_theme = _get(f"{legacy.env_prefix(spec)}_DEFAULT_THEME", "")
         reports[spec.id] = {
             "label": spec.label,
             "weeks": int(raw_weeks) if raw_weeks.isdigit() else spec.default_weeks,
@@ -358,9 +355,9 @@ def update_settings(body: SettingsWrite, _: dict = Depends(_verify_google_token)
         except ReportConfigError:
             raise HTTPException(status_code=404, detail=f"Unknown report '{report_id}'") from None
         if values.weeks is not None:
-            updates[f"{spec.env_prefix}_DEFAULT_WEEKS"] = str(values.weeks)
+            updates[f"{legacy.env_prefix(spec)}_DEFAULT_WEEKS"] = str(values.weeks)
         if values.theme is not None:
-            updates[f"{spec.env_prefix}_DEFAULT_THEME"] = (
+            updates[f"{legacy.env_prefix(spec)}_DEFAULT_THEME"] = (
                 values.theme if values.theme in VALID_THEMES else ""
             )
 
@@ -396,8 +393,8 @@ def run_report_job(
     if not spec.enabled:
         raise HTTPException(status_code=404, detail=f"Report '{spec.id}' is disabled")
 
-    weeks = req.weeks or spec.resolved_weeks()
-    theme = req.theme or spec.resolved_theme() or ""
+    weeks = req.weeks or legacy.resolved_weeks(spec)
+    theme = req.theme or legacy.resolved_theme(spec) or ""
     if DEMO_MODE:
         cmd = [sys.executable, "demo_run.py", spec.id,
                theme if theme in VALID_THEMES else ""]

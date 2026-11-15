@@ -4,10 +4,10 @@
 # set of optional features its rosters need — bus-route lookup, attendance
 # summaries, the volunteer arrival report, instructions, where to upload them.
 #
-# Definitions live in reports.yaml (project root, or backend/, or $REPORTS_CONFIG).
-# If no file is found, DEFAULT_REPORTS is used, which reproduces the original
-# hardcoded "Rutas" + "Escuela Dominical" behaviour — so an existing install that
-# never adds a reports.yaml keeps working unchanged.
+# This module only describes and validates reports. Where a church's reports
+# come from is somebody else's job: legacy.py reads reports.yaml and .env for
+# IBL's original job, and the platform reads each church's stored settings.
+# Nothing here touches the environment or keeps state.
 #
 # Every optional feature defaults to OFF. A church with no bus ministry writes a
 # spec with no route_source_event and no volunteer_event, and the pipeline never
@@ -15,27 +15,16 @@
 #
 # ReportSpec is a plain frozen dataclass rather than a pydantic model on purpose:
 # cli.py imports it, and the Cloud Run job image installs only requirements.txt.
-# Keeping it stdlib means the job image gains just pyyaml.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field, fields
 from datetime import date, timedelta
-from pathlib import Path
-
-import yaml
-
-from planning_center_reports.config import RUTAS_SUBTITLE
 
 # Output kinds a report can request.
-#   "simple"  → Roster.pdf  — the class/route roster
-OUTPUT_FILENAMES: dict[str, str] = {
-    "simple":  "Roster.pdf",
-}
-VOLUNTEERS_FILENAME   = "Voluntarios.pdf"
-VOLUNTEERS_FOLDER     = "Voluntarios"
-INSTRUCTIONS_FILENAME = "Instrucciones.pdf"
+#   "simple"  → the class/route roster (the file is named by the church's
+#               language: "Roster.pdf", see i18n "file.roster")
+OUTPUT_KINDS: tuple[str, ...] = ("simple",)
 
 
 # Theme keys accepted in default_theme — mirrors config.THEMES minus the None key.
@@ -95,7 +84,7 @@ class ReportSpec:
     volunteer_weeks:   int = 4
 
     # ── Destination ───────────────────────────────────────────────────────────
-    # None ⇒ location folders sit directly under GOOGLE_DRIVE_PARENT_FOLDER_ID.
+    # None ⇒ location folders sit directly under the church's destination folder.
     drive_folder_prefix: str | None = None
 
     # ── Run defaults ──────────────────────────────────────────────────────────
@@ -120,10 +109,10 @@ class ReportSpec:
         outputs = tuple(outputs)
         if not outputs:
             raise ValueError("outputs must list at least one of 'simple'")
-        unknown = [o for o in outputs if o not in OUTPUT_FILENAMES]
+        unknown = [o for o in outputs if o not in OUTPUT_KINDS]
         if unknown:
             raise ValueError(
-                f"unknown output(s) {unknown}; expected any of {sorted(OUTPUT_FILENAMES)}"
+                f"unknown output(s) {unknown}; expected any of {sorted(OUTPUT_KINDS)}"
             )
         object.__setattr__(self, "outputs", outputs)
         object.__setattr__(self, "demo_locations", tuple(self.demo_locations or ()))
@@ -170,22 +159,6 @@ class ReportSpec:
         """Subtitle drawn in the PDF header."""
         return self.subtitle if self.subtitle else self.label
 
-    @property
-    def env_prefix(self) -> str:
-        """Prefix for this report's env-var overrides, e.g. 'rutas' → 'RUTAS'.
-
-        Chosen so the pre-existing RUTAS_DEFAULT_WEEKS / ESCUELA_DEFAULT_WEEKS
-        names keep working without migration.
-        """
-        return self.id.upper().replace("-", "_")
-
-    def resolved_weeks(self) -> int:
-        """default_weeks, unless <PREFIX>_DEFAULT_WEEKS overrides it in the environment."""
-        raw = os.environ.get(f"{self.env_prefix}_DEFAULT_WEEKS", "").strip()
-        if raw.isdigit() and 1 <= int(raw) <= 52:
-            return int(raw)
-        return self.default_weeks
-
     def history_start(self, today: date | None = None) -> date:
         """First local date whose Sunday is fetched."""
         if self.start_date:
@@ -193,76 +166,11 @@ class ReportSpec:
         # One day short of history_weeks, so exactly history_weeks Sundays fit.
         return (today or date.today()) - timedelta(weeks=self.history_weeks, days=-1)
 
-    def resolved_theme(self) -> str | None:
-        """default_theme, unless <PREFIX>_DEFAULT_THEME overrides it in the environment."""
-        raw = os.environ.get(f"{self.env_prefix}_DEFAULT_THEME", "").strip()
-        if raw in VALID_THEMES:
-            return raw
-        return self.default_theme
-
-    def public_dict(self) -> dict:
-        """The subset of the spec the frontend needs (no PCO event names)."""
-        return {
-            "id":            self.id,
-            "label":         self.label,
-            "icon":          self.icon,
-            "outputs":       list(self.outputs),
-            "show_route":    self.show_route,
-            "default_weeks": self.resolved_weeks(),
-            "default_theme": self.resolved_theme() or "",
-        }
-
-
-# ── Built-in defaults ─────────────────────────────────────────────────────────
-# Reproduces the behaviour that was hardcoded in services.py before reports.yaml
-# existed. Used verbatim when no config file is present.
-DEFAULT_REPORTS: tuple[ReportSpec, ...] = (
-    ReportSpec(
-        id="rutas",
-        label="Rutas",
-        pco_event="Rutas",
-        icon="🚌",
-        subtitle=RUTAS_SUBTITLE,       # "Ministerio de Autobuses" unless overridden in .env
-        outputs=("simple",),
-        demo_locations=("Ruta 1 - Bus", "Ruta 2 - Van", "Ruta 3 - Carro"),
-    ),
-    ReportSpec(
-        id="escuela",
-        label="Escuela Dominical",
-        pco_event="Escuela Dominical",
-        icon="📚",
-        outputs=("simple",),
-        route_source_event="Rutas",
-        show_route=True,
-        attendance_summary=True,
-        demo_locations=("Clase Primaria", "Clase Secundaria"),
-    ),
-)
 
 _KNOWN_FIELDS = {f.name for f in fields(ReportSpec)}
 
 
-# ── Loading ───────────────────────────────────────────────────────────────────
-_PACKAGE_DIR = Path(__file__).resolve().parent
-_BACKEND_DIR = _PACKAGE_DIR.parent
-_PROJECT_DIR = _BACKEND_DIR.parent
-
-_cache: tuple[ReportSpec, ...] | None = None
-
-
-def config_path() -> Path | None:
-    """Return the reports config file that will be used, or None if there is none."""
-    override = os.environ.get("REPORTS_CONFIG", "").strip()
-    if override:
-        p = Path(override).expanduser()
-        if not p.exists():
-            raise ReportConfigError(f"REPORTS_CONFIG points at a missing file: {p}")
-        return p
-    for candidate in (_PROJECT_DIR / "reports.yaml", _BACKEND_DIR / "reports.yaml"):
-        if candidate.exists():
-            return candidate
-    return None
-
+# ── Parsing ───────────────────────────────────────────────────────────────────
 
 def parse_reports(raw: object, source: str = "<memory>") -> tuple[ReportSpec, ...]:
     """Validate a parsed YAML document into ReportSpecs.
@@ -303,38 +211,12 @@ def parse_reports(raw: object, source: str = "<memory>") -> tuple[ReportSpec, ..
     return tuple(specs)
 
 
-def load_reports(refresh: bool = False) -> tuple[ReportSpec, ...]:
-    """Return every configured report (enabled and disabled), cached after first call."""
-    global _cache
-    if _cache is not None and not refresh:
-        return _cache
-
-    path = config_path()
-    if path is None:
-        _cache = DEFAULT_REPORTS
-        return _cache
-
-    try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise ReportConfigError(f"{path}: could not parse YAML — {exc}") from exc
-
-    _cache = parse_reports(raw, source=str(path))
-    return _cache
-
-
-def enabled_reports() -> tuple[ReportSpec, ...]:
-    """Reports the UI and schedulers should offer."""
-    return tuple(s for s in load_reports() if s.enabled)
-
-
-def get_report(key: str) -> ReportSpec:
+def find_report(specs: tuple[ReportSpec, ...], key: str) -> ReportSpec:
     """Resolve a report by id, then by exact PCO event name.
 
     Matching pco_event is what keeps `python main.py "Escuela Dominical"` and the
     existing Cloud Run job arguments working after the move to ids.
     """
-    specs = load_reports()
     for spec in specs:
         if spec.id == key:
             return spec

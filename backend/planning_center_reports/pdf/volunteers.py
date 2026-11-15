@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from planning_center_reports.pdf.context import RenderContext
 from planning_center_reports.pdf.layout import (
     Cell,
     Column,
@@ -28,21 +29,24 @@ def _time_cell(a: Arrival | None) -> Cell:
     return Cell(a.clock) if a else Cell(style="dash")
 
 
-def generate_volunteer_pdf(report: VolunteerReport, subtitle: str, filename: str) -> str:
+def generate_volunteer_pdf(report: VolunteerReport, subtitle: str, filename: str,
+                           ctx: RenderContext) -> str:
     """Write Voluntarios.pdf and return `filename`."""
+    texts = ctx.texts
+    t = texts.t
     n = len(report.periods)
-    page = Page(filename, report.title, subtitle, [f"Últimos {n} domingos"], legend=())
+    page = Page(filename, ctx, report.title, subtitle, [t("volunteers.meta", sundays=n)], legend=())
 
-    cols = [Column("", 8), Column("Nombre", 210)]
-    cols += [Column(p.label, 74, "center") for p in report.periods]
-    cols += [Column("Asistencia", 70, "center"), Column("Hora usual", 70, "center")]
+    cols = [Column("", 8), Column(t("col.name"), 210)]
+    cols += [Column(texts.short_date(p.local_date), 74, "center") for p in report.periods]
+    cols += [Column(t("col.attendance"), 70, "center"), Column(t("col.usual_time"), 70, "center")]
 
     rows: list[Row] = []
-    group = None
+    group: object = object()          # never equal to a real group, including None
     for r in report.rows:
         if r.group != group:
             group = r.group
-            rows.append(Row(group=group))
+            rows.append(Row(group=r.group or t("volunteers.unassigned")))
         rows.append(Row(cells=[
             Cell(),
             Cell(r.name, style="bold"),
@@ -51,23 +55,20 @@ def generate_volunteer_pdf(report: VolunteerReport, subtitle: str, filename: str
             Cell(r.average_clock, style="muted"),
         ]))
 
-    draw_section(page, "Voluntarios", len(report.rows),
-                 note="Hora de check-in cada domingo · — = no hizo check-in", keep_with=40)
-    draw_table(page, cols, rows, empty_text=(
-        "Nadie fue registrado como voluntario en estos domingos. Para que aparezcan aquí, "
-        "márcalos como \"Volunteer\" al hacer check-in."
-    ))
+    draw_section(page, t("volunteers.section"), len(report.rows),
+                 note=t("volunteers.note"), keep_with=40)
+    draw_table(page, cols, rows, empty_text=t("volunteers.empty"))
 
     if report.rows:
         rate = report.attendance_rate
         draw_resumen(page, [
-            ("Voluntarios", str(len(report.rows))),
-            ("Promedio por domingo", f"{report.average_present:.0f}"),
-            ("Asistencia", f"{rate:.0%}" if rate is not None else "—"),
+            (t("summary.volunteers"), str(len(report.rows))),
+            (t("summary.average"), f"{report.average_present:.0f}"),
+            (t("summary.attendance"), f"{rate:.0%}" if rate is not None else "—"),
         ], [(
-            [Column("Domingo", 70), Column("Presentes", 64, "center"),
-             Column("Primer check-in", 90, "center"), Column("Check-in promedio", 100, "center")],
-            [Row(cells=[Cell(s.label, style="bold"), Cell(str(s.present)),
+            [Column(t("col.sunday"), 70), Column(t("col.present"), 64, "center"),
+             Column(t("col.first_checkin"), 90, "center"), Column(t("col.average_checkin"), 100, "center")],
+            [Row(cells=[Cell(texts.short_date(s.day), style="bold"), Cell(str(s.present)),
                         Cell(s.first or "—"), Cell(s.average or "—")]) for s in report.sundays],
         )])
 

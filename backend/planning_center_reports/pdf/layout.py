@@ -25,25 +25,19 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.pdfgen import canvas as rl_canvas
 
-import planning_center_reports.config as cfg
 from planning_center_reports.config import (
     ASSETS_DIR,
     COL_HDR_H,
-    FEEDBACK_FORM_URL,
     GOLD_STAR,
     GREY_LINE,
     INK,
-    LOGO_PATH,
     MARGIN,
-    MESES_ES,
     MUTED,
     ROW_H,
-    VERSE_REF,
-    VERSE_TEXT,
     WHITE,
     YELLOW_WARN,
-    T,
 )
+from planning_center_reports.pdf.context import RenderContext
 
 FONT      = "Helvetica"
 FONT_BOLD = "Helvetica-Bold"
@@ -56,15 +50,6 @@ DOT_EMPTY      = colors.HexColor("#D9DEE5")
 
 
 # ── Text helpers ──────────────────────────────────────────────────────────────
-
-def fecha_es(dt: datetime | None = None) -> str:
-    """"Generado el 15 de marzo de 2026 a las 10:32" """
-    dt = dt or datetime.now()
-    return (
-        f"Generado el {dt.day} de {MESES_ES[dt.month]} de {dt.year} "
-        f"a las {dt.strftime('%H:%M')}"
-    )
-
 
 def fit(c, text: str, width: float, font: str = FONT, size: float = 8) -> str:
     """Truncate `text` with an ellipsis so it fits `width` points."""
@@ -98,9 +83,9 @@ def draw_star(c, cx: float, cy: float, r: float, color=GOLD_STAR) -> None:
     c.drawPath(path, fill=1, stroke=0)
 
 
-def draw_new_marker(c, cx: float, cy: float) -> None:
+def draw_new_marker(c, ctx: RenderContext, cx: float, cy: float) -> None:
     """Theme's visitor icon if it has one, otherwise a gold star."""
-    icon = cfg._theme.get("visitor_icon")
+    icon = ctx.theme.get("visitor_icon")
     path = os.path.join(ASSETS_DIR, icon) if icon else None
     if path and os.path.exists(path):
         c.drawImage(path, cx - 4.5, cy - 4.5, width=9, height=9, mask="auto")
@@ -143,16 +128,17 @@ def caps(c, x: float, y: float, text: str, size: float = 6.6, color=MUTED,
     c.drawText(t)
 
 
-FEEDBACK_LABEL = "¿Dudas o ideas? Cuéntanos ›"
-
-
-def feedback_link(c, x_right: float, y: float) -> None:
-    """Right-aligned text link to the feedback form."""
+def feedback_link(c, ctx: RenderContext, x_right: float, y: float) -> None:
+    """Right-aligned text link to the church's feedback form, if it has one."""
+    url = ctx.branding.feedback_url
+    if not url:
+        return
+    label = ctx.texts.t("feedback.link")
     c.setFont(FONT_BOLD, 7)
-    c.setFillColor(T("col_header"))
-    c.drawRightString(x_right, y, FEEDBACK_LABEL)
-    w = c.stringWidth(FEEDBACK_LABEL, FONT_BOLD, 7)
-    c.linkURL(FEEDBACK_FORM_URL, (x_right - w, y - 2, x_right, y + 8), relative=0)
+    c.setFillColor(ctx.T("col_header"))
+    c.drawRightString(x_right, y, label)
+    w = c.stringWidth(label, FONT_BOLD, 7)
+    c.linkURL(url, (x_right - w, y - 2, x_right, y + 8), relative=0)
 
 
 # ── Page chrome ───────────────────────────────────────────────────────────────
@@ -161,13 +147,14 @@ class Page:
     """One PDF document: running cursor, automatic page breaks, header/footer.
 
     Usage:
-        page = Page(path, "Ruta 7", "Ministerio de Autobuses", ["Historial: …"])
+        page = Page(path, ctx, "Ruta 7", "Ministerio de Autobuses", ["Historial: …"])
         page.ensure(40); ...draw at page.y...; page.y -= 40
         page.save()
     """
 
-    def __init__(self, path: str, title: str, subtitle: str, meta: list[str],
+    def __init__(self, path: str, ctx: RenderContext, title: str, subtitle: str, meta: list[str],
                  legend: tuple[str, ...] = ("new", "warn"), pagesize=landscape(letter)):
+        self.ctx = ctx
         self.c = rl_canvas.Canvas(path, pagesize=pagesize)
         self.c.setTitle(f"{title} — {subtitle}")
         self.c.setAuthor("Planning Center Check-Ins Reports")
@@ -183,34 +170,35 @@ class Page:
     def _first_header(self, meta: list[str]) -> float:
         c, top = self.c, self.height - MARGIN
         title_x = MARGIN
-        if os.path.exists(LOGO_PATH):
+        logo = self.ctx.branding.logo_path
+        if logo and os.path.exists(logo):
             logo_h = 22
             logo_w = logo_h * (300 / 58)
-            c.drawImage(LOGO_PATH, MARGIN, top - logo_h, width=logo_w, height=logo_h, mask="auto")
+            c.drawImage(logo, MARGIN, top - logo_h, width=logo_w, height=logo_h, mask="auto")
             title_x = MARGIN + logo_w + 12
 
         c.setFont(FONT_BOLD, 14)
-        c.setFillColor(T("title"))
+        c.setFillColor(self.ctx.T("title"))
         c.drawString(title_x, top - 13, fit(c, self.title, self.usable_w * 0.5, FONT_BOLD, 14))
         c.setFont(FONT, 8)
-        c.setFillColor(T("subtitle"))
+        c.setFillColor(self.ctx.T("subtitle"))
         c.drawString(title_x, top - 25, self.subtitle)
 
-        campaign = cfg._theme.get("campaign")
+        campaign = self.ctx.campaign
         if campaign:
             c.setFont(FONT_BOLD, 10)
-            c.setFillColor(T("addr_bar"))
+            c.setFillColor(self.ctx.T("addr_bar"))
             c.drawCentredString(self.width / 2, top - 18, campaign)
 
         c.setFont(FONT, 7)
         c.setFillColor(MUTED)
-        lines = [fecha_es(self.gen_dt), *meta]
+        lines = [self.ctx.texts.generated(self.gen_dt), *meta]
         for i, line in enumerate(lines):
             c.drawRightString(self.width - MARGIN, top - 7 - i * 9, line)
-        feedback_link(c, self.width - MARGIN, top - 7 - len(lines) * 9)
+        feedback_link(c, self.ctx, self.width - MARGIN, top - 7 - len(lines) * 9)
 
         rule_y = top - 36
-        c.setStrokeColor(T("rule"))
+        c.setStrokeColor(self.ctx.T("rule"))
         c.setLineWidth(1.2)
         c.line(MARGIN, rule_y, self.width - MARGIN, rule_y)
         return rule_y - 10
@@ -218,39 +206,40 @@ class Page:
     def _continuation_header(self) -> float:
         c, top = self.c, self.height - MARGIN
         c.setFont(FONT_BOLD, 10)
-        c.setFillColor(T("title"))
+        c.setFillColor(self.ctx.T("title"))
         c.drawString(MARGIN, top - 8, self.title)
         w = c.stringWidth(self.title, FONT_BOLD, 10)
         c.setFont(FONT, 7.5)
         c.setFillColor(MUTED)
-        c.drawString(MARGIN + w + 8, top - 8, f"{self.subtitle} · continuación")
-        feedback_link(c, self.width - MARGIN, top - 8)
+        c.drawString(MARGIN + w + 8, top - 8, f"{self.subtitle} · {self.ctx.texts.t('page.continued')}")
+        feedback_link(c, self.ctx, self.width - MARGIN, top - 8)
         rule_y = top - 15
-        c.setStrokeColor(T("rule"))
+        c.setStrokeColor(self.ctx.T("rule"))
         c.setLineWidth(1.2)
         c.line(MARGIN, rule_y, self.width - MARGIN, rule_y)
         return rule_y - 10
 
     def _footer(self) -> None:
         c = self.c
-        c.setStrokeColor(T("rule"))
+        c.setStrokeColor(self.ctx.T("rule"))
         c.setLineWidth(0.8)
         c.line(MARGIN, MARGIN - 4, self.width - MARGIN, MARGIN - 4)
+        texts, branding = self.ctx.texts, self.ctx.branding
         c.setFont(FONT_ITAL, 7)
-        c.setFillColor(T("footer_text"))
-        c.drawString(MARGIN, MARGIN - 14, VERSE_TEXT)
+        c.setFillColor(self.ctx.T("footer_text"))
+        c.drawString(MARGIN, MARGIN - 14, branding.verse_text)
         c.setFont(FONT_BOLD, 7)
-        c.drawString(MARGIN, MARGIN - 23, VERSE_REF)
+        c.drawString(MARGIN, MARGIN - 23, branding.verse_ref)
 
         x = self.width - MARGIN - 52
         c.setFont(FONT, 7)
         c.setFillColor(MUTED)
-        c.drawRightString(self.width - MARGIN, MARGIN - 17, f"Página {self.page_num}")
+        c.drawRightString(self.width - MARGIN, MARGIN - 17, texts.t("page.number", n=self.page_num))
         for item in reversed(self.legend):
-            label = {"new": "Nuevo este domingo", "warn": "Falta información"}.get(item, item)
+            label = {"new": texts.t("legend.new"), "warn": texts.t("legend.warn")}.get(item, item)
             x -= c.stringWidth(label, FONT, 6.8) + 22
             if item == "new":
-                draw_new_marker(c, x + 4, MARGIN - 15)
+                draw_new_marker(c, self.ctx, x + 4, MARGIN - 15)
             elif item == "warn":
                 c.setFillColor(YELLOW_WARN)
                 c.setStrokeColor(GREY_LINE)
@@ -285,10 +274,10 @@ def draw_section(page: Page, title: str, count: int | None = None, accent=None,
     """Section heading: title, count chip and a muted note."""
     c = page.c
     page.ensure(22 + keep_with)
-    accent = accent or T("col_header")
+    accent = accent or page.ctx.T("col_header")
     y = page.y
     c.setFont(FONT_BOLD, 11)
-    c.setFillColor(T("title"))
+    c.setFillColor(page.ctx.T("title"))
     c.drawString(MARGIN, y - 10, title)
     x = MARGIN + c.stringWidth(title, FONT_BOLD, 11) + 7
     if count is not None:
@@ -344,24 +333,24 @@ def _draw_header_row(page: Page, columns: list[Column], color, x0: float) -> Non
     page.y = y - COL_HDR_H
 
 
-def _draw_meter(c, x: float, y_mid: float, filled: int, total: int) -> None:
+def _draw_meter(c, ctx: RenderContext, x: float, y_mid: float, filled: int, total: int) -> None:
     for i in range(total):
-        c.setFillColor(T("col_header") if i < filled else DOT_EMPTY)
+        c.setFillColor(ctx.T("col_header") if i < filled else DOT_EMPTY)
         c.circle(x + 3 + i * 6.4, y_mid, 2.2, fill=1, stroke=0)
 
 
-def _draw_cell(c, cell: Cell, col: Column, x: float, y_mid: float) -> None:
+def _draw_cell(c, ctx: RenderContext, cell: Cell, col: Column, x: float, y_mid: float) -> None:
     pad, avail = 5, col.width - 10
     if cell.style == "meter":
         filled, total = cell.meter
         width = total * 6.4
         start = x + (col.width - width) / 2 if col.align == "center" else x + pad
-        _draw_meter(c, start, y_mid, filled, total)
+        _draw_meter(c, ctx, start, y_mid, filled, total)
         return
     if cell.style == "chip":
         w = c.stringWidth(cell.text, FONT_BOLD, 7) + 10
         px = {"center": x + (col.width - w) / 2, "right": x + col.width - w - pad}.get(col.align, x + pad)
-        chip(c, px, y_mid, cell.text, cell.color or T("col_header"), max_w=avail + 6)
+        chip(c, px, y_mid, cell.text, cell.color or ctx.T("col_header"), max_w=avail + 6)
         return
     font = FONT_BOLD if cell.style == "bold" else FONT
     text = "—" if cell.style == "dash" else fit(c, cell.text, avail, font, 8)
@@ -384,7 +373,7 @@ def draw_table(page: Page, columns: list[Column], rows: list[Row], header_color=
                empty_text: str = "", x0: float = MARGIN, gap_after: float = 14) -> None:
     """Draw a table at x0, repeating its header row after every page break."""
     c = page.c
-    header_color = header_color or T("col_header")
+    header_color = header_color or page.ctx.T("col_header")
     width = sum(col.width for col in columns)
     page.ensure(COL_HDR_H + ROW_H)
     _draw_header_row(page, columns, header_color, x0)
@@ -408,13 +397,13 @@ def draw_table(page: Page, columns: list[Column], rows: list[Row], header_color=
             c.setFillColor(tint(header_color, 0.14))
             c.rect(x0, y - h, width, h, fill=1, stroke=0)
             c.setFont(FONT_BOLD, 7.6)
-            c.setFillColor(T("title"))
+            c.setFillColor(page.ctx.T("title"))
             c.drawString(x0 + 6, y - h + 5, row.group)
             page.y = y - h
             stripe = 0
             continue
 
-        c.setFillColor(WHITE if stripe % 2 == 0 else T("row_alt"))
+        c.setFillColor(WHITE if stripe % 2 == 0 else page.ctx.T("row_alt"))
         c.rect(x0, y - h, width, h, fill=1, stroke=0)
         line_mid = y - ROW_H / 2 - (1 if row.sub else 0)
         x = x0
@@ -424,10 +413,10 @@ def draw_table(page: Page, columns: list[Column], rows: list[Row], header_color=
                 c.rect(x, y - ROW_H, col.width, ROW_H, fill=1, stroke=0)
             x += col.width
         if row.marker:
-            draw_new_marker(c, x0 + columns[0].width / 2, line_mid)
+            draw_new_marker(c, page.ctx, x0 + columns[0].width / 2, line_mid)
         x = x0
         for cell, col in zip(row.cells, columns, strict=False):
-            _draw_cell(c, cell, col, x, line_mid)
+            _draw_cell(c, page.ctx, cell, col, x, line_mid)
             x += col.width
 
         if row.sub:
@@ -439,7 +428,7 @@ def draw_table(page: Page, columns: list[Column], rows: list[Row], header_color=
                     continue
                 if label:
                     c.setFont(FONT_BOLD, 6.8)
-                    c.setFillColor(T("subtitle"))
+                    c.setFillColor(page.ctx.T("subtitle"))
                     c.drawString(sx, sy, label)
                     sx += c.stringWidth(label, FONT_BOLD, 6.8) + 5
                 c.setFont(FONT, 6.8)
@@ -481,7 +470,7 @@ def draw_resumen(page: Page, stats: list[tuple[str, str]],
     tables — kept together on one page."""
     tallest = max((table_height(rows) for _, rows in tables), default=0)
     page.ensure(18 + 20 + tallest + 4)
-    draw_section(page, "Resumen")
+    draw_section(page, page.ctx.texts.t("summary.title"))
     draw_stats_line(page, stats)
     if tables:
         draw_side_by_side(page, tables)
@@ -505,23 +494,25 @@ def draw_stats_line(page: Page, stats: list[tuple[str, str]]) -> None:
 
 
 def draw_feedback_card(page: Page) -> None:
-    """End-of-document box: QR code + link to the feedback form."""
+    """End-of-document box: QR code + link to the church's feedback form, if it has one."""
+    url, texts = page.ctx.branding.feedback_url, page.ctx.texts
+    if not url:
+        return
     c, h = page.c, 58
     page.ensure(h + 6)
     y = page.y - 4
     c.setStrokeColor(GREY_LINE)
     c.setLineWidth(0.6)
     c.rect(MARGIN, y - h, page.usable_w, h, fill=0, stroke=1)
-    draw_qr(c, MARGIN + 6, y - h + 5, 48, FEEDBACK_FORM_URL)
+    draw_qr(c, MARGIN + 6, y - h + 5, 48, url)
     c.setFont(FONT_BOLD, 10)
-    c.setFillColor(T("title"))
-    c.drawString(MARGIN + 64, y - 19, "¿Algo confuso? ¿Una idea? ¿Algo que no funciona? Cuéntanos.")
+    c.setFillColor(page.ctx.T("title"))
+    c.drawString(MARGIN + 64, y - 19, texts.t("feedback.title"))
     c.setFont(FONT, 8)
     c.setFillColor(MUTED)
-    c.drawString(MARGIN + 64, y - 33, "Escanea el código o toca aquí para dejar tus comentarios, dudas o quejas.")
-    c.drawString(MARGIN + 64, y - 45, "Entre más nos digas, mejor podemos hacer estas listas.  "
-                                      "·  Scan or tap to share feedback.")
-    c.linkURL(FEEDBACK_FORM_URL, (MARGIN, y - h, MARGIN + page.usable_w, y), relative=0)
+    c.drawString(MARGIN + 64, y - 33, texts.t("feedback.line1"))
+    c.drawString(MARGIN + 64, y - 45, texts.t("feedback.line2"))
+    c.linkURL(url, (MARGIN, y - h, MARGIN + page.usable_w, y), relative=0)
     page.y = y - h - 8
 
 

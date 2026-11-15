@@ -2,3 +2,6 @@ pytest
 ruff==0.17.1
 httpx
 fastapi
+time-machine
+reportlab==5.1.0
+pypdf==7.1.0

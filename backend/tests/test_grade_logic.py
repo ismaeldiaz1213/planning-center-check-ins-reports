@@ -6,7 +6,13 @@
 
 from datetime import date
 
-from planning_center_reports.models import _age_from_birthday, _is_minor, _resolve_grade
+from planning_center_reports.i18n import catalog
+from planning_center_reports.models import _age_from_birthday, _is_minor
+from planning_center_reports.models import _resolve_grade as _resolve_grade_in
+
+
+def _resolve_grade(grade: str, birthday: str) -> str:
+    return _resolve_grade_in(grade, birthday, catalog("es"))
 
 
 def _birthday_for_age(years: int) -> str:

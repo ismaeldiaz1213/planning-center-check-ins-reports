@@ -1,11 +1,14 @@
 # tests/test_formatting.py
 #
-# Tests for date/display formatting helpers in models.py.
+# Tests for date/display formatting helpers in models.py and the text catalogs.
 # These are all pure functions with no external dependencies.
 
 from datetime import datetime
 
-from planning_center_reports.models import _fecha_es, _fmt_birthday
+from planning_center_reports.i18n import catalog
+from planning_center_reports.models import _fmt_birthday
+
+_fecha_es = catalog("es").generated   # the "Generado el …" header line
 
 
 class TestFmtBirthday:
@@ -51,9 +54,3 @@ class TestFechaEs:
         for i, month in enumerate(months, start=1):
             dt = datetime(2026, i, 1)
             assert month in _fecha_es(dt), f"Month {i} should render as '{month}'"
-
-    def test_no_arg_returns_string(self):
-        # Without an explicit datetime it uses now() — just check the return type
-        result = _fecha_es()
-        assert isinstance(result, str)
-        assert "Generado el" in result

@@ -4,9 +4,24 @@
 # runs every report with --all.
 
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def run_context():
+    """Replace legacy.run_context so no test builds a real client or delivery.
+
+    Yields the mock; its call kwargs are the --dry-run / --output-dir the CLI
+    resolved, and `.ctx` is the context handed to run_report / run_all.
+    """
+    with patch("planning_center_reports.cli.legacy.run_context") as factory:
+        ctx = MagicMock()
+        ctx.pco.stats.summary.return_value = "Planning Center: 0 requests"
+        factory.return_value.__enter__.return_value = ctx
+        factory.ctx = ctx
+        yield factory
 
 
 class TestCLIFlags:
@@ -17,13 +32,13 @@ class TestCLIFlags:
     """
 
     @patch("planning_center_reports.cli.run_report")
-    def test_dry_run_flag_passed_through(self, mock_run, monkeypatch):
+    def test_dry_run_flag_passed_through(self, mock_run, monkeypatch, run_context):
         monkeypatch.setattr(sys, "argv", ["main.py", "--dry-run", "Rutas"])
         from planning_center_reports.cli import main
         main()
         mock_run.assert_called_once()
-        _, kwargs = mock_run.call_args
-        assert kwargs["dry_run"] is True
+        assert run_context.call_args.kwargs["dry_run"] is True
+        assert mock_run.call_args.args[0] is run_context.ctx
 
     @patch("planning_center_reports.cli.run_report")
     def test_location_flag_passed_through(self, mock_run, monkeypatch):
@@ -34,22 +49,21 @@ class TestCLIFlags:
         assert kwargs["location_filter"] == "Ruta 8"
 
     @patch("planning_center_reports.cli.run_report")
-    def test_output_dir_flag_passed_through(self, mock_run, monkeypatch):
+    def test_output_dir_flag_passed_through(self, mock_run, monkeypatch, run_context):
         monkeypatch.setattr(
             sys, "argv", ["main.py", "--dry-run", "--output-dir", "/tmp/test", "Rutas"]
         )
         from planning_center_reports.cli import main
         main()
-        _, kwargs = mock_run.call_args
-        assert kwargs["output_dir"] == "/tmp/test"
+        assert run_context.call_args.kwargs["output_dir"] == "/tmp/test"
 
     @patch("planning_center_reports.cli.run_report")
-    def test_no_dry_run_by_default(self, mock_run, monkeypatch):
+    def test_no_dry_run_by_default(self, mock_run, monkeypatch, run_context):
         monkeypatch.setattr(sys, "argv", ["main.py", "Rutas"])
         from planning_center_reports.cli import main
         main()
-        _, kwargs = mock_run.call_args
-        assert kwargs["dry_run"] is False
+        mock_run.assert_called_once()
+        assert run_context.call_args.kwargs["dry_run"] is False
 
     @patch("planning_center_reports.cli.run_report")
     def test_no_location_filter_by_default(self, mock_run, monkeypatch):
@@ -65,7 +79,7 @@ class TestCLIFlags:
         monkeypatch.setattr(sys, "argv", ["main.py", "--dry-run", "Escuela Dominical"])
         from planning_center_reports.cli import main
         main()
-        spec = mock_run.call_args[0][0]
+        spec = mock_run.call_args.args[1]
         assert spec.id == "escuela"
 
     @patch("planning_center_reports.cli.run_report")
@@ -73,29 +87,46 @@ class TestCLIFlags:
         monkeypatch.setattr(sys, "argv", ["main.py", "escuela-b"])
         from planning_center_reports.cli import main
         main()
-        spec = mock_run.call_args[0][0]
+        spec = mock_run.call_args.args[1]
         assert spec.id == "escuela-b"
         assert spec.pco_event == '"B" Escuela Dominical'
 
     @patch("planning_center_reports.cli.run_report")
-    def test_unknown_report_exits_with_error(self, mock_run, monkeypatch):
+    def test_unknown_report_exits_with_error(self, mock_run, monkeypatch, run_context):
         monkeypatch.setattr(sys, "argv", ["main.py", "Nope"])
         from planning_center_reports.cli import main
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 1
         mock_run.assert_not_called()
+        run_context.assert_not_called()
+
+    @patch("planning_center_reports.cli.run_report")
+    def test_weeks_and_theme_flags_win_over_the_reports_defaults(self, mock_run, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["main.py", "--weeks", "7", "--theme", "verano", "Rutas"])
+        from planning_center_reports.cli import main
+        main()
+        assert mock_run.call_args.kwargs["weeks"] == 7
+        assert mock_run.call_args.kwargs["theme"] == "verano"
+
+    @patch("planning_center_reports.cli.run_report")
+    def test_prints_the_request_summary(self, _mock_run, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", ["main.py", "Rutas"])
+        from planning_center_reports.cli import main
+        main()
+        assert "Planning Center: 0 requests" in capsys.readouterr().out
 
 
 class TestAllFlag:
     @patch("planning_center_reports.cli.run_all", return_value=True)
-    def test_all_runs_every_report(self, mock_all, monkeypatch):
+    def test_all_runs_every_report(self, mock_all, monkeypatch, run_context):
         monkeypatch.setattr(sys, "argv", ["main.py", "--all", "--dry-run"])
         from planning_center_reports.cli import main
         with pytest.raises(SystemExit) as exc:
             main()
         assert exc.value.code == 0
-        assert mock_all.call_args.kwargs["dry_run"] is True
+        assert run_context.call_args.kwargs["dry_run"] is True
+        assert mock_all.call_args.args[0] is run_context.ctx
 
     @patch("planning_center_reports.cli.run_all", return_value=False)
     def test_a_failed_report_fails_the_job(self, _mock, monkeypatch):

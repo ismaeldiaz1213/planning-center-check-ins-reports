@@ -30,16 +30,10 @@
 import argparse
 from collections import defaultdict
 
-import planning_center_reports.config as config  # noqa: F401 — triggers .env loading
-from planning_center_reports.pco_client import (
-    age_from_birthday,
-    get_checkins_for_event_periods,
-    get_event_id,
-    get_locations,
-    get_person_details,
-    get_recent_event_periods,
-)
-from promote_checkins import bulk_checkin, get_web_session, resolve_event_time_id
+from planning_center_reports.pco_client import age_from_birthday
+
+# `pco` is promote_checkins' Planning Center connection (signed in from .env), shared here.
+from promote_checkins import bulk_checkin, get_web_session, pco, resolve_event_time_id
 
 C_EVENT = '"C" Escuela Dominical'
 
@@ -72,9 +66,9 @@ def first_location_per_person(event_name: str, weeks: int, name_prefix: str = ""
     """Return {person_id: {first_name, last_name, location}} for everyone checked into
     `event_name` in the last `weeks` periods, keeping their most recent location.
     With `name_prefix`, only locations starting with it count."""
-    event_id = get_event_id(event_name)
-    period_ids, _, _ = get_recent_event_periods(event_id, weeks=weeks)
-    checkins, included = get_checkins_for_event_periods(event_id, period_ids)
+    event_id = pco.get_event_id(event_name)
+    period_ids, _, _ = pco.get_recent_event_periods(event_id, weeks=weeks)
+    checkins, included = pco.get_checkins_for_event_periods(event_id, period_ids)
     locations = {i["id"]: i["attributes"]["name"] for i in included if i["type"] == "Location"}
     people = {i["id"]: i["attributes"] for i in included if i["type"] == "Person"}
 
@@ -162,10 +156,10 @@ def main():
                         help="Print the plan without submitting any check-ins")
     args = parser.parse_args()
 
-    event_id = get_event_id(args.event)
-    period_ids, period_dates, _ = get_recent_event_periods(event_id, weeks=1)
+    event_id = pco.get_event_id(args.event)
+    period_ids, period_dates, _ = pco.get_recent_event_periods(event_id, weeks=1)
     destination_period_id = period_ids[0]
-    location_ids = {loc["name"]: loc["id"] for loc in get_locations(event_id)}
+    location_ids = {loc["name"]: loc["id"] for loc in pco.get_locations(event_id)}
 
     print(f"\nFinding bus riders in '{args.route_event}' (last {args.weeks} weeks)...", flush=True)
     riders = first_location_per_person(args.route_event, args.weeks, args.route_prefix)
@@ -186,7 +180,7 @@ def main():
           flush=True)
     details = {}
     for pid in candidates:
-        d = get_person_details(pid)
+        d = pco.get_person_details(pid)
         details[pid] = {
             "grade_num": d.get("grade_num"),
             "gender": d.get("gender", ""),
