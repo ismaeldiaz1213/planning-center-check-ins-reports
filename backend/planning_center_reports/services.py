@@ -59,6 +59,8 @@ class RunContext:
         self._checkins:  dict[tuple[str, str], tuple[list, list]] = {}
         self._guardians: dict[str, dict] = {}
         self._instructions: str | None = None
+        # One entry per roster written, for whoever started the run to report on.
+        self.summary: list[dict] = []
 
     def __enter__(self) -> RunContext:
         return self
@@ -272,8 +274,12 @@ def run_report(
         path = generate_roster_pdf(
             roster, spec.pdf_subtitle, os.path.join(ctx.workdir, f"{_slug(name)}.pdf"), render,
             show_route=spec.show_route, attendance_summary=spec.attendance_summary,
+            **({"hide": spec.hide} if spec.hide else {}),
         )
         ctx.delivery.deliver(path, base + [name], texts.t("file.roster"))
+        ctx.summary.append({"report": spec.id, "location": name, "active": len(roster.active),
+                            "new": roster.new_this_week, "inactive": len(roster.inactive),
+                            "workers": len(roster.workers)})
         if spec.instructions:
             ctx.delivery.deliver(ctx.instructions_pdf(), base + [name], texts.t("file.instructions"),
                                  fingerprint=instructions_fingerprint(ctx.render()))

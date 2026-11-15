@@ -240,7 +240,7 @@ class TestSignIn:
         assert client.get("/api/auth/config").json()["dev_churches"][0]["id"] == "demo"
         assert client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF).status_code == 200
         me = client.get("/api/me").json()
-        assert me["church"]["name"] == "Grace Community Church"
+        assert me["church"]["name"] == "Liberty Baptist Church"
         assert me["connections"]["pco"]["kind"] == "demo"
         assert "sealed" not in str(me)
 
@@ -375,7 +375,7 @@ class TestTwoChurchIsolation:
     @pytest.fixture
     def two(self, app, settings, store):
         a = TestClient(app)
-        a.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)           # Grace (English)
+        a.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)           # Liberty (English)
         make_church(settings, store, "200", "Iglesia Dos")                        # Spanish, bus routes only
         b = client_for(app, settings, "200")
         run_a = a.post("/api/runs", headers=CSRF).json()["id"]
@@ -384,7 +384,7 @@ class TestTwoChurchIsolation:
 
     def test_each_sees_only_its_own_church_and_reports(self, two):
         a, b, *_ = two
-        assert a.get("/api/me").json()["church"]["name"] == "Grace Community Church"
+        assert a.get("/api/me").json()["church"]["name"] == "Liberty Baptist Church"
         assert b.get("/api/me").json()["church"]["name"] == "Iglesia Dos"
         assert len(a.get("/api/modules/checkin_reports").json()["reports"]) == 2
         assert len(b.get("/api/modules/checkin_reports").json()["reports"]) == 1
@@ -412,7 +412,7 @@ class TestTwoChurchIsolation:
     def test_changes_and_disconnect_touch_only_your_own_church(self, two, settings, store):
         a, b, run_a, run_b = two
         b.put("/api/church", headers=CSRF, json={"name": "Renombrada"})
-        assert a.get("/api/me").json()["church"]["name"] == "Grace Community Church"
+        assert a.get("/api/me").json()["church"]["name"] == "Liberty Baptist Church"
         assert b.post("/api/disconnect", headers=CSRF).status_code == 200
         assert not [p for p in store.docs if p.startswith("churches/200")]
         assert not (settings.files_dir / "churches" / "200").exists()
@@ -424,7 +424,7 @@ class TestTwoChurchIsolation:
         a, _b, _run_a, run_b = two
         for extra in ({"params": {"org_id": "200", "church": "200"}},
                       {"headers": {"X-Church-Id": "200", "X-Org-Id": "200"}}):
-            assert a.get("/api/me", **extra).json()["church"]["name"] == "Grace Community Church"
+            assert a.get("/api/me", **extra).json()["church"]["name"] == "Liberty Baptist Church"
             assert a.get(f"/api/runs/{run_b}", **extra).status_code == 404
 
 
@@ -494,3 +494,170 @@ class TestPcoOAuth:
         assert client.auth.request_kwargs() == {"headers": {"Authorization": "Bearer new-access"}}
         assert r.secret("pco")["refresh_token"] == "new-refresh"
         assert "new-access" not in str(store.docs)
+
+
+class TestStatsAndGuides:
+    def test_a_run_reports_who_is_on_the_rosters(self, app):
+        client = TestClient(app)
+        client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)
+        run = client.get(f"/api/runs/{client.post('/api/runs', headers=CSRF).json()['id']}").json()
+        assert run["totals"]["rosters"] == len(run["summary"]) == 6
+        assert run["totals"]["active"] == sum(row["active"] for row in run["summary"]) > 0
+        assert {row["report"] for row in run["summary"]} == {"sunday-school", "bus-routes"}
+        assert client.get("/api/runs").json()["runs"][0]["totals"] == run["totals"]
+
+    def test_instruction_guides_can_be_english_spanish_or_both(self, app):
+        client = TestClient(app)
+        client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)
+
+        def instructions_size():
+            run = client.get(f"/api/runs/{client.post('/api/runs', headers=CSRF).json()['id']}").json()
+            return next(o["bytes"] for o in run["outputs"] if o["path"].endswith("Instructions.pdf"))
+        english_only = instructions_size()
+        saved = client.put("/api/church", headers=CSRF, json={"instructions_languages": ["en", "es"]})
+        assert saved.json()["instructions_languages"] == ["en", "es"]
+        assert instructions_size() > english_only
+        assert client.put("/api/church", headers=CSRF, json={"instructions_languages": []}).json()[
+            "instructions_languages"] is None
+        assert client.put("/api/church", headers=CSRF, json={"instructions_languages": ["fr"]}).status_code == 422
+
+
+# ── Progress, cancel, schedule, preview ───────────────────────────────────────
+
+from datetime import UTC, datetime  # noqa: E402
+
+from advanced_reports import dispatch as scheduling  # noqa: E402
+
+
+class TestProgressAndCancel:
+    def test_outputs_say_which_report_and_class_they_belong_to(self, app):
+        client = TestClient(app)
+        client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)
+        run = client.get(f"/api/runs/{client.post('/api/runs', headers=CSRF).json()['id']}").json()
+        by_kind = {}
+        for out in run["outputs"]:
+            by_kind.setdefault(out["kind"], []).append(out)
+        assert len(by_kind["roster"]) == 6 and len(by_kind["volunteers"]) == 2 and len(by_kind["instructions"]) == 4
+        nursery = next(o for o in by_kind["roster"] if o["location"] == "Nursery")
+        assert nursery["report"] == "sunday-school" and nursery["path"] == "Sunday_School/Nursery/Roster.pdf"
+        assert run["usage"]["steps"] > 20 and run["progress"] is None
+
+    def test_second_run_knows_how_far_along_it_is(self, settings, store):
+        r = make_church(settings, store, "100", "Uno")
+        first = r.create_run("manual")
+        runner.execute(settings, store, "100", first["id"])
+        seen = []
+        original = TenantRepo.save_run
+
+        def spy(self, run):
+            if run.get("progress"):
+                seen.append(dict(run["progress"]))
+            original(self, run)
+        TenantRepo.save_run = spy
+        try:
+            second = r.create_run("manual")
+            runner._SAVE_EVERY_S, keep = 0, runner._SAVE_EVERY_S
+            runner.execute(settings, store, "100", second["id"])
+        finally:
+            TenantRepo.save_run = original
+            runner._SAVE_EVERY_S = keep
+        assert seen and all(0 < p["fraction"] <= 0.97 for p in seen)
+        assert [p["fraction"] for p in seen] == sorted(p["fraction"] for p in seen)
+        assert {p["phase"] for p in seen} >= {"event", "sundays", "checkins", "parents", "saving"}
+        assert seen[-1]["report"]["label"] == "Bus Routes" and seen[-1]["report"]["count"] == 1
+
+    def test_cancel_stops_the_run_and_keeps_no_files(self, settings, store):
+        r = make_church(settings, store, "100", "Uno")
+        run = r.create_run("manual")
+        r.request_cancel(run["id"])
+        assert runner.execute(settings, store, "100", run["id"]) is False
+        done = r.run(run["id"])
+        assert done["status"] == "cancelled" and done["outputs"] == [] and done["totals"] == {}
+        assert not (settings.files_dir / "churches" / "100" / "runs" / run["id"]).exists()
+        assert r.active_run() is None
+
+    def test_cancel_route(self, settings, store):
+        class Never:
+            def launch(self, *_):
+                pass
+        make_church(settings, store, "100", "Uno")
+        make_church(settings, store, "200", "Dos")
+        app = create_app(settings, store, Never())
+        a, b = client_for(app, settings, "100"), client_for(app, settings, "200")
+        run_id = a.post("/api/runs", headers=CSRF).json()["id"]
+        assert a.post(f"/api/runs/{run_id}/cancel").status_code == 403           # needs the CSRF header
+        assert b.post(f"/api/runs/{run_id}/cancel", headers=CSRF).status_code == 404   # not their run
+        assert a.get(f"/api/runs/{run_id}").json()["cancelling"] is False
+        assert a.post(f"/api/runs/{run_id}/cancel", headers=CSRF).status_code == 200
+        assert a.get(f"/api/runs/{run_id}").json()["cancelling"] is True
+        runner.execute(settings, store, "100", run_id)
+        assert a.get(f"/api/runs/{run_id}").json()["status"] == "cancelled"
+        assert a.post(f"/api/runs/{run_id}/cancel", headers=CSRF).status_code == 409
+
+
+class TestSchedule:
+    SAT_6PM_CHICAGO = datetime(2026, 11, 15, 0, 5, tzinfo=UTC)      # Saturday 18:05 in America/Chicago
+
+    def test_save_and_validate(self, app, settings, store):
+        make_church(settings, store, "100", "Uno")
+        client = client_for(app, settings, "100")
+        assert client.get("/api/church").json()["schedule"] == {"enabled": False, "day": "sat", "time": "18:00"}
+        saved = client.put("/api/church", headers=CSRF, json={"schedule": {"enabled": True, "day": "sun", "time": "05:30"}})
+        assert saved.json()["schedule"] == {"enabled": True, "day": "sun", "time": "05:30"}
+        for bad in ({"day": "someday", "time": "05:30"}, {"day": "sun", "time": "25:00"}, {"day": "sun"}):
+            assert client.put("/api/church", headers=CSRF, json={"schedule": bad}).status_code == 422
+
+    def test_due_only_on_its_day_and_hour_in_the_churchs_time_zone(self):
+        church = {"timezone": "America/Chicago", "schedule": {"enabled": True, "day": "sat", "time": "18:00"}}
+        assert scheduling.is_due(church, self.SAT_6PM_CHICAGO) == "2026-11-14"
+        assert scheduling.is_due(church, datetime(2026, 11, 14, 23, 30, tzinfo=UTC)) is None      # 17:30, too early
+        assert scheduling.is_due(church, datetime(2026, 11, 15, 4, 0, tzinfo=UTC)) is None        # 22:00, past the grace time
+        assert scheduling.is_due({**church, "timezone": "Asia/Tokyo"}, self.SAT_6PM_CHICAGO) is None
+        assert scheduling.is_due({**church, "schedule_last": "2026-11-14"}, self.SAT_6PM_CHICAGO) is None
+        assert scheduling.is_due({**church, "schedule": {**church["schedule"], "enabled": False}}, self.SAT_6PM_CHICAGO) is None
+
+    def test_dispatch_starts_each_due_church_once(self, settings, store, launcher):
+        due, off = make_church(settings, store, "100", "Uno"), make_church(settings, store, "200", "Dos")
+        due.update_church({"schedule": {"enabled": True, "day": "sat", "time": "18:00"}})
+        off.update_church({"schedule": {"enabled": False, "day": "sat", "time": "18:00"}})
+        assert scheduling.dispatch(settings, store, launcher, self.SAT_6PM_CHICAGO) == ["100"]
+        assert scheduling.dispatch(settings, store, launcher, self.SAT_6PM_CHICAGO) == []
+        (run,) = due.runs()
+        assert run["trigger"] == "schedule" and run["status"] == "succeeded" and off.runs() == []
+
+    def test_dispatch_route_needs_its_key(self, settings, store, launcher):
+        assert TestClient(create_app(settings, store, launcher)).post("/internal/dispatch").status_code == 404
+        keyed = Settings(data_dir=settings.data_dir, master_key_b64=settings.master_key_b64,
+                         session_secret="s", dispatch_key="k3y")
+        client = TestClient(create_app(keyed, store, launcher))
+        assert client.post("/internal/dispatch", headers={"X-AR-Dispatch-Key": "wrong"}).status_code == 404
+        assert client.post("/internal/dispatch", headers={"X-AR-Dispatch-Key": "k3y"}).json() == {"started": 0}
+
+
+class TestPreviewAndColumns:
+    def test_preview_follows_the_boxes_ticked(self, app, settings, store):
+        from io import BytesIO
+
+        from pypdf import PdfReader
+        make_church(settings, store, "100", "Uno")
+        client = client_for(app, settings, "100")
+
+        def text(report):
+            response = client.post("/api/preview/roster", headers=CSRF, json={"report": report})
+            assert response.status_code == 200 and response.headers["content-type"] == "application/pdf"
+            return "\n".join(page.extract_text() for page in PdfReader(BytesIO(response.content)).pages)
+        full = text({"label": "Primarios"})
+        slim = text({"label": "Primarios", "hide": ["phone", "address", "inactive"], "show_route": True})
+        assert "Primarios" in full and "Teléfono" in full and "Ruta" not in full
+        assert "Teléfono" not in slim and "Dirección" not in slim and "Ruta" in slim
+        assert client.post("/api/preview/roster", headers=CSRF, json={"report": {"hide": ["shoes"]}}).status_code == 422
+        assert TestClient(app).post("/api/preview/roster", headers=CSRF, json={"report": {}}).status_code == 401
+
+    def test_saved_report_keeps_hidden_columns_and_a_run_uses_them(self, app, settings, store):
+        make_church(settings, store, "100", "Uno")
+        client = client_for(app, settings, "100")
+        report = {**demo.REPORTS[1], "hide": ["address", "birthday"]}
+        assert client.put("/api/modules/checkin_reports", headers=CSRF, json={"reports": [report]}).json()[
+            "reports"][0]["hide"] == ["address", "birthday"]
+        run = client.get(f"/api/runs/{client.post('/api/runs', headers=CSRF).json()['id']}").json()
+        assert run["status"] == "succeeded"

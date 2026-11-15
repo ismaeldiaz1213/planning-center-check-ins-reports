@@ -26,7 +26,7 @@ def pco_client(repo: TenantRepo, settings: Settings):
         raise NotConnected("Planning Center is not connected")
     kind = conn.get("kind")
     if kind == "demo" and settings.dev_login:
-        return demo.DemoPco()
+        return demo.DemoPco(step_s=settings.demo_step_s)
     if kind == "pat":
         return PcoClient(PersonalAccessToken(conn["app_id"], conn["secret"]))
     if kind == "oauth":

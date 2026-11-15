@@ -160,4 +160,6 @@ COVER = {
         ("Guía completa en español", "guia-check-in-es.pdf"),
         ("Full guide in English", "check-in-guide-en.pdf"),
     ),
+    # Used when the church chooses which guides to include (Branding.guide_languages).
+    "guide_labels": {"es": "Guía completa en español", "en": "Full guide in English"},
 }

@@ -24,6 +24,12 @@ _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 STALE_RUN = timedelta(minutes=30)
 
 
+def all_org_ids(store: Store) -> list[str]:
+    """Every church id. The one place that looks across churches: the scheduler
+    uses it to find whose weekly run is due, then works through a TenantRepo."""
+    return [path.split("/", 1)[1] for path, _doc in store.list("churches")]
+
+
 def now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -106,7 +112,8 @@ class TenantRepo:
         run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(3)
         run = {"id": run_id, "trigger": trigger, "started_by": started_by, "status": "queued",
                "created_at": now_iso(), "started_at": None, "finished_at": None,
-               "log": [], "outputs": [], "usage": {}, "timings": {}, "error": None}
+               "log": [], "outputs": [], "summary": [], "totals": {}, "usage": {}, "timings": {},
+               "progress": None, "error": None}
         self._store.set(f"{self._root}/runs/{run_id}", run)
         return run
 
@@ -121,6 +128,17 @@ class TenantRepo:
     def runs(self, limit: int = 20) -> list[dict]:
         found = [doc for _path, doc in self._store.list(f"{self._root}/runs")]
         return sorted(found, key=lambda r: r["id"], reverse=True)[:limit]
+
+    def request_cancel(self, run_id: str) -> None:
+        """Ask a run to stop. Kept apart from the run document, which only the runner writes."""
+        self._store.set(f"{self._root}/runs/{run_id}/signals/cancel", {"at": now_iso()})
+
+    def cancel_requested(self, run_id: str) -> bool:
+        return self._store.get(f"{self._root}/runs/{run_id}/signals/cancel") is not None
+
+    def discard_run_files(self, run_id: str) -> None:
+        if _RUN_ID.match(run_id):
+            shutil.rmtree(self._files / "runs" / run_id, ignore_errors=True)
 
     def active_run(self) -> dict | None:
         """The church's queued or running run, if any (one at a time)."""

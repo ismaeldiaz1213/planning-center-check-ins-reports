@@ -42,9 +42,20 @@ NAVY  = THEMES[None]["title"]
 BLUE  = THEMES[None]["col_header"]
 
 
-def guides(texts: Catalog) -> list[tuple[str, str]]:
-    """(table-of-contents label, file path) for each guide bundled after the cover."""
-    return [(label, os.path.join(ASSETS_DIR, "guides", name)) for label, name in texts.cover["guides"]]
+GUIDE_FILES = {"es": "guia-check-in-es.pdf", "en": "check-in-guide-en.pdf"}
+
+
+def guides(texts: Catalog, languages: tuple[str, ...] | None = None) -> list[tuple[str, str]]:
+    """(table-of-contents label, file path) for each guide bundled after the cover.
+
+    `languages` is the church's own choice (Branding.guide_languages); None means
+    the default set for the PDF language.
+    """
+    if languages is None:
+        chosen = texts.cover["guides"]
+    else:
+        chosen = [(texts.cover["guide_labels"][lang], GUIDE_FILES[lang]) for lang in languages]
+    return [(label, os.path.join(ASSETS_DIR, "guides", name)) for label, name in chosen]
 
 
 def instructions_fingerprint(ctx: RenderContext) -> str:
@@ -55,8 +66,10 @@ def instructions_fingerprint(ctx: RenderContext) -> str:
         # Spanish keeps the original formula, so IBL's existing copies in Drive
         # still match and are not re-uploaded.
         seed += f"|{ctx.texts.code}"
+    if b.guide_languages is not None:
+        seed += f"|guides:{','.join(b.guide_languages)}"
     h = hashlib.sha256(seed.encode())
-    for _, path in guides(ctx.texts):
+    for _, path in guides(ctx.texts, b.guide_languages):
         if os.path.exists(path):
             with open(path, "rb") as f:
                 h.update(f.read())
@@ -210,7 +223,8 @@ def _cover(path: str, guide_pages: list[tuple[str, int]], ctx: RenderContext) ->
 
 def build_instructions_pdf(filename: str, ctx: RenderContext) -> str:
     """Write Instrucciones.pdf (cover + guides) and return `filename`."""
-    readers = [(label, PdfReader(path)) for label, path in guides(ctx.texts) if os.path.exists(path)]
+    readers = [(label, PdfReader(path)) for label, path in guides(ctx.texts, ctx.branding.guide_languages)
+               if os.path.exists(path)]
     page_no, toc = 2, []
     for label, reader in readers:
         toc.append((label, page_no))

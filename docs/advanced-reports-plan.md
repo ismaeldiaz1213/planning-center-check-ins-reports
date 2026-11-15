@@ -47,7 +47,7 @@ _Last updated: 2026-11-14 (Saturday, late; session paused mid step 3)_
 | Milestone 1 step 2: benchmark baseline | 🟡 Local and render baselines recorded in `docs/benchmarks.md`. Production baseline (real `roster-weekly` runs), image size and cold start still missing. |
 | Milestone 1 step 3: engine refactor | ✅ Done 2026-11-14. Verified live: a dry run of the refactored engine produced the same 105 files with identical text to the baseline, in 134 requests. |
 | Milestone 1 step 4: platform core | 🟡 **Runs locally** (`backend/advanced_reports/`). Not built: Firestore store, Google Drive connection, scheduler/dispatch. Planning Center OAuth is written but has never met the real service. See "Steps 4–5" below. |
-| Milestone 1 step 5: minimal dashboard | 🟡 Working single page served by the API (sign in, run now, files, history, church settings, disconnect; English/Spanish). It is plain HTML/JS, not the React app, and reports are shown read-only. |
+| Milestone 1 step 5: minimal dashboard | 🟡 **Third pass 2026-11-14**: home page, sign-in, and a dashboard with Overview, Rosters, Set up (wizard with live preview), Schedule, Help and Settings. Light/dark, English/Spanish, phone and desktop. Static files served by the API (`advanced_reports/static/`), not the React app. |
 | Milestone 1 steps 6–7 | ⬜ Not started; blocked on the accounts above |
 | Milestones 2–5 | ⬜ Not started |
 
@@ -72,6 +72,64 @@ Try it: `cd backend && AR_DEV_LOGIN=1 .venv/bin/uvicorn advanced_reports.app:cre
   download, change, run and disconnect across churches are all refused; forged, swapped
   and expired session cookies are refused; a secret copied into another church's record
   does not decrypt; disconnect leaves no documents or files.
+
+**Added after the first demo (owner feedback, 2026-11-14; not yet committed):**
+- The instructions bundle can carry the English guide, the Spanish guide, or both
+  (`Branding.guide_languages`, Settings → Instructions). The default is unchanged, so IBL's
+  output and golden snapshots are untouched.
+- The sample church is now **Liberty Baptist Church** (`demo.py`, org `dev-liberty`). Only
+  the name is real; people, classes and routes are invented, and its time zone
+  (`America/Chicago`) is a guess.
+- Each run records who is on the rosters (`RunContext.summary` in the engine → `summary`
+  and `totals` on the run), which feeds the dashboard's numbers. Runs made before this
+  change (IBL's first platform run) have no numbers until the next run.
+- Look: a variation of the Mannabyte Labs style rather than a copy, at the owner's request
+  ("more independent Baptist"): navy, burgundy and gold on ivory, Noto Serif headings, a
+  chapel in the scene and as the product mark, "by Mannabyte Labs" as a small credit, and
+  1 Corinthians 14:40 in the footer. Fonts (Inter, Noto Serif; both OFL) are served locally.
+- Home-page samples are rendered from `mock_data` by `python -m advanced_reports.make_samples`
+  (invented people, Chick-fil-A addresses).
+- **The home page says rosters land in Google Drive. That is not built yet.** It describes
+  the product as planned; do not put this page in front of churches until Drive works.
+- Checked by eye in Chrome: every page in both themes on desktop, and the dashboard and home
+  page at phone width (in a narrow frame, not on a phone). Not checked: Safari, Firefox, a
+  real phone, a screen reader, the Spanish layout beyond the text catalog having every key.
+
+**Third pass (owner feedback, 2026-11-14; not yet committed):**
+- **Look:** Mannabyte's fonts (Outfit + Inter) and shapes, but this product's own colours:
+  one pine-to-mint green ramp, a calm blue as the second colour, amber only for "new".
+  Deep pine at night. No sand tones. The backdrop is soft hills with a small church and
+  trees on the ridge, drawn in the hill tones (the owner rejected two earlier palettes and
+  a sticker-like chapel the same evening; ask before changing colours again). The pitch is ministry, not software: "Less time in spreadsheets. More time
+  with your people."
+- **Set up tab = the wizard.** Add or edit a roster in four steps: what it is for (classes,
+  bus routes, any event), which Check-Ins event (its locations are listed), what it shows,
+  who is on it. Step three has tick boxes and a **live PDF preview** drawn by the real engine
+  from sample people (`POST /api/preview/roster`). Bus routes are optional throughout.
+- **Engine:** `ReportSpec.hide` leaves columns and sections off a roster (birthday, phone,
+  grade, attendance, added, address, parents, workers, inactive, summary). Empty by default,
+  so IBL's PDFs are unchanged; the two report-settings snapshots gained `"hide": []` and
+  nothing else (deliberate `--update-golden` of `snapshots/config/` only).
+- **Progress and cancel.** The runner counts steps (each Planning Center call, each roster
+  drawn) and shows the current one in words, a percentage and time left, measured against
+  the church's last finished run. A first run has no estimate. Cancel stops between steps
+  and discards that run's files; the previous rosters stay.
+- **Rosters tab** groups rosters by event, hides the instructions PDF, and lists each
+  volunteer sheet under its event. The folders on disk are unchanged.
+- **Schedule tab** replaces History: weekly day and time per church, plus past runs.
+  `advanced_reports/dispatch.py` starts due runs; locally the web service checks once a
+  minute, in production Cloud Scheduler must call `POST /internal/dispatch` with
+  `X-AR-Dispatch-Key` (set `AR_DISPATCH_KEY`). A run is started up to three hours late,
+  never twice in a day.
+- **Help tab:** eight how-tos and the owner's contact address.
+- The sample church pauses 0.2 s per Planning Center call (`AR_DEMO_STEP_SECONDS`) so
+  progress and cancel can be seen; it does not affect real churches.
+- Known rough edges: hiding the address column stretches the last column instead of
+  rebalancing widths; the preview always uses the same sample people; the wizard cannot yet
+  set a different event for the volunteer sheet (IBL's bus-meeting setting is kept if
+  already present, but is not editable); two people editing rosters at once would overwrite
+  each other; the "why we built it" text on the home page is written in the owner's voice
+  and needs his review.
 
 **Deliberate shortcuts for tonight, each one a gap:**
 - **Sign-in is a development bypass** (`AR_DEV_LOGIN=1`), not Planning Center OAuth. The

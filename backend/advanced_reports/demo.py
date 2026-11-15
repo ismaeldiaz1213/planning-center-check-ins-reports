@@ -1,7 +1,9 @@
 # advanced_reports/demo.py
 #
-# A made-up church for local demos and tests: "Grace Community Church", English,
-# with a Sunday School event and a Bus Routes event. DemoPco stands in for
+# The sample church for local demos and tests: "Liberty Baptist Church" (the
+# second church planned for the platform), English, with a Sunday School event
+# and a Bus Routes event. Only the church's name is real: its people, classes
+# and routes here are invented until Liberty connects its own Planning Center. DemoPco stands in for
 # PcoClient (the methods a run and the dashboard use) and never touches the
 # network. Every name, phone number and address here is invented.
 #
@@ -11,12 +13,13 @@
 from __future__ import annotations
 
 import random
+import time
 from datetime import UTC, date, datetime, timedelta
 
 from planning_center_reports.pco_client import RequestStats
 
-ORG_ID = "dev-demo"
-CHURCH = {"name": "Grace Community Church", "timezone": "America/New_York", "language": "en",
+ORG_ID = "dev-liberty"
+CHURCH = {"name": "Liberty Baptist Church", "timezone": "America/Chicago", "language": "en",
           "branding": {"verse_text": '"Let the little children come to me"',
                        "verse_ref": "Matthew 19:14",
                        "help_contact": "the welcome desk"}}
@@ -50,8 +53,9 @@ def _last_sunday(today: date) -> date:
 
 
 class DemoPco:
-    def __init__(self, today: date | None = None, seed: int = 7):
+    def __init__(self, today: date | None = None, seed: int = 7, step_s: float = 0.0):
         self.stats = RequestStats()
+        self._step_s = step_s          # a real Planning Center call takes about 0.4 s; imitate that in demos
         rng = random.Random(seed)
         last = _last_sunday(today or datetime.now(UTC).date())
         self.sundays = [last - timedelta(weeks=WEEKS - 1 - w) for w in range(WEEKS)]
@@ -135,7 +139,12 @@ class DemoPco:
     def list_events(self) -> list[dict]:
         return [{"id": i, "name": n, "archived": False} for i, n in EVENTS.items()]
 
+    def _wait(self) -> None:
+        if self._step_s:
+            time.sleep(self._step_s)
+
     def get_event_id(self, event_name: str) -> str:
+        self._wait()
         for event_id, name in EVENTS.items():
             if name == event_name:
                 return event_id
@@ -148,6 +157,7 @@ class DemoPco:
         return [{"id": i, "name": n} for i, n in pairs]
 
     def get_event_periods_since(self, event_id, since, tz=UTC, max_periods=52) -> list[dict]:
+        self._wait()
         hour, minute = START_UTC[event_id]
         found = []
         for w, day in enumerate(self.sundays):
@@ -157,6 +167,7 @@ class DemoPco:
         return found[-max_periods:]
 
     def get_checkins_for_event_periods(self, event_id, event_period_ids) -> tuple[list, list]:
+        self._wait()
         checkins: list[dict] = []
         for period_id in event_period_ids:
             checkins += self.checkins.get((event_id, int(period_id.rsplit("-", 1)[1])), [])
@@ -171,4 +182,5 @@ class DemoPco:
         return checkins, included
 
     def get_guardians(self, child_ids) -> dict[str, dict]:
+        self._wait()
         return {i: self.guardians[i] for i in child_ids if i in self.guardians}

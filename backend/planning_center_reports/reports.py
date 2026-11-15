@@ -26,6 +26,10 @@ from datetime import date, timedelta
 #               language: "Roster.pdf", see i18n "file.roster")
 OUTPUT_KINDS: tuple[str, ...] = ("simple",)
 
+# What a report may leave off its rosters (the `hide` field). Names always show.
+HIDEABLE: tuple[str, ...] = ("birthday", "phone", "grade", "attendance", "added", "address",
+                             "parents", "workers", "inactive", "summary")
+
 
 # Theme keys accepted in default_theme — mirrors config.THEMES minus the None key.
 VALID_THEMES = {"primavera", "verano", "otono", "invierno"}
@@ -71,6 +75,9 @@ class ReportSpec:
     # None ⇒ the corresponding PCO event is never fetched.
     route_source_event: str | None = None
     show_route:         bool = False   # render the "Ruta" column
+    # Columns and sections left off the roster: any of "birthday", "phone", "grade",
+    # "attendance", "added", "address", "parents", "workers", "inactive", "summary".
+    hide:               tuple[str, ...] = ()
     attendance_summary: bool = False   # per-route breakdown under the roster
     instructions:       bool = False   # Instrucciones.pdf in every location folder
 
@@ -116,6 +123,12 @@ class ReportSpec:
             )
         object.__setattr__(self, "outputs", outputs)
         object.__setattr__(self, "demo_locations", tuple(self.demo_locations or ()))
+
+        hide = (self.hide,) if isinstance(self.hide, str) else tuple(dict.fromkeys(self.hide or ()))
+        unknown = [h for h in hide if h not in HIDEABLE]
+        if unknown:
+            raise ValueError(f"unknown hide value(s) {unknown}; expected any of {list(HIDEABLE)}")
+        object.__setattr__(self, "hide", hide)
 
         theme = self.default_theme or None
         if theme is not None and theme not in VALID_THEMES:

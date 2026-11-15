@@ -23,6 +23,18 @@ class Branding:
     help_contact: str = ""            # who volunteers ask for help (instructions cover)
     video_url:    str = ""            # check-in walkthrough (instructions cover, QR)
     feedback_url: str = ""            # feedback form linked from every PDF
+    # Which check-in guides go in the instructions bundle, in order: any of "es",
+    # "en". None keeps the language's default (Spanish churches get both guides,
+    # English churches the English one).
+    guide_languages: tuple[str, ...] | None = None
+
+    def __post_init__(self):
+        if self.guide_languages is not None:
+            langs = tuple(dict.fromkeys(self.guide_languages))
+            unknown = [g for g in langs if g not in ("es", "en")]
+            if unknown or not langs:
+                raise ValueError(f"guide_languages must list 'es' and/or 'en', got {self.guide_languages!r}")
+            object.__setattr__(self, "guide_languages", langs)
 
 
 @dataclass(frozen=True)

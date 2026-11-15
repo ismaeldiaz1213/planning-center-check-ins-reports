@@ -12,18 +12,25 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import subprocess
 import sys
+import tempfile
+import threading
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 from zoneinfo import available_timezones
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from advanced_reports import demo
+from advanced_reports import dispatch as scheduling
 from advanced_reports.core import connections, pco_oauth, session
 from advanced_reports.core.store import FileStore, Store
 from advanced_reports.core.tenant_repo import TenantRepo
@@ -31,12 +38,22 @@ from advanced_reports.importers import ibl
 from advanced_reports.modules import checkin_reports
 from advanced_reports.settings import Settings, from_env
 from planning_center_reports.i18n import LANGUAGES
-from planning_center_reports.reports import VALID_THEMES, ReportConfigError
+from planning_center_reports.mock_data import mock_roster
+from planning_center_reports.pdf.context import RenderContext
+from planning_center_reports.pdf.rosters import generate_roster_pdf
+from planning_center_reports.reports import HIDEABLE, VALID_THEMES, ReportConfigError
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _BACKEND = Path(__file__).resolve().parent.parent
 _STATE_COOKIE = "ar_oauth_state"
 _BRANDING = ("verse_text", "verse_ref", "help_contact", "video_url", "feedback_url")
+
+
+def with_errors_ignored(action) -> None:
+    try:
+        action()
+    except Exception as exc:  # the schedule loop must survive one bad pass
+        print(f"schedule check failed: {exc}", file=sys.stderr)
 
 
 class Launcher(Protocol):
@@ -57,6 +74,12 @@ class ChurchUpdate(BaseModel):
     language: str | None = None
     theme: str | None = None
     branding: dict[str, str] | None = None
+    instructions_languages: list[str] | None = None
+    schedule: dict | None = None
+
+
+class PreviewRequest(BaseModel):
+    report: dict
 
 
 class ReportsUpdate(BaseModel):
@@ -69,6 +92,7 @@ class DevLogin(BaseModel):
 
 def create_app(settings: Settings | None = None, store: Store | None = None,
                launcher: Launcher | None = None) -> FastAPI:
+    local_server = settings is None       # started by uvicorn, not built by a test
     settings = settings or from_env()
     store = store or FileStore(settings.store_dir)
     launcher = launcher or SubprocessLauncher()
@@ -106,7 +130,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
     def dev_churches() -> list[dict]:
         if not settings.dev_login:
             return []
-        found = [{"id": "demo", "name": demo.CHURCH["name"], "note": "made-up data"}]
+        found = [{"id": "demo", "name": demo.CHURCH["name"], "note": "sample data"}]
         if ibl.available():
             found.append({"id": "ibl", "name": "Iglesia Bautista Libertad",
                           "note": "live Planning Center data, from .env"})
@@ -183,13 +207,18 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
         return {"name": doc["name"], "timezone": doc["timezone"], "language": doc["language"],
                 "theme": doc.get("theme"), "status": doc.get("status", "active"),
                 "branding": {k: (doc.get("branding") or {}).get(k, "") for k in _BRANDING},
+                "instructions_languages": doc.get("instructions_languages") or None,
+                "schedule": {"enabled": False, "day": "sat", "time": "18:00", **(doc.get("schedule") or {})},
+                "schedule_last": doc.get("schedule_last"),
+                "created_at": doc.get("created_at"),
                 "has_logo": repo.logo_path() is not None}
 
     @app.get("/api/me")
     def me(who: dict = Depends(current), repo: TenantRepo = Depends(church_repo)):
         return {"person": {"name": who["name"]}, "church": public_church(repo),
                 "connections": {"pco": repo.connection("pco"), "google": repo.connection("google")},
-                "options": {"languages": list(LANGUAGES), "themes": sorted(VALID_THEMES)}}
+                "options": {"languages": list(LANGUAGES), "themes": sorted(VALID_THEMES),
+                            "hideable": list(HIDEABLE)}}
 
     @app.get("/api/church")
     def get_church(repo: TenantRepo = Depends(church_repo)):
@@ -224,13 +253,26 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
                     raise HTTPException(422, f"{key} must start with https://")
             changes["branding"] = {**(doc.get("branding") or {}),
                                    **{k: v.strip()[:300] for k, v in body.branding.items()}}
+        if "instructions_languages" in body.model_fields_set:
+            chosen = list(dict.fromkeys(body.instructions_languages or []))
+            if any(lang not in LANGUAGES for lang in chosen):
+                raise HTTPException(422, "Instruction guides are available in 'es' and 'en'")
+            changes["instructions_languages"] = chosen or None
+        if body.schedule is not None:
+            day, at = body.schedule.get("day"), str(body.schedule.get("time", ""))
+            if day not in scheduling.DAYS or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", at):
+                raise HTTPException(422, "The schedule needs a day (mon…sun) and a time like 18:00")
+            changes["schedule"] = {"enabled": bool(body.schedule.get("enabled")), "day": day, "time": at}
+            changes["schedule_last"] = None      # a changed schedule may run again today
         repo.update_church(changes)
         return public_church(repo)
 
     # ── Check-In Reports module ───────────────────────────────────────────────
     @app.get("/api/modules/checkin_reports")
     def get_reports(repo: TenantRepo = Depends(church_repo)):
-        return {"reports": (repo.module(checkin_reports.MODULE_ID) or {}).get("reports", [])}
+        stored = (repo.module(checkin_reports.MODULE_ID) or {}).get("reports") or []
+        # Through the engine's own schema, so settings saved before a field existed come back complete.
+        return {"reports": [checkin_reports.spec_to_dict(s) for s in checkin_reports.parse(stored)] if stored else []}
 
     @app.put("/api/modules/checkin_reports", dependencies=[Depends(changing)])
     def put_reports(body: ReportsUpdate, repo: TenantRepo = Depends(church_repo)):
@@ -270,13 +312,18 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
             raise HTTPException(502, "Planning Center could not be reached") from exc
 
     # ── Runs ──────────────────────────────────────────────────────────────────
-    def public_run(run: dict, with_log: bool) -> dict:
+    def public_run(run: dict, with_log: bool, repo: TenantRepo) -> dict:
         out = {k: run.get(k) for k in ("id", "trigger", "started_by", "status", "created_at",
                                        "started_at", "finished_at", "error", "usage", "timings")}
+        out["totals"] = run.get("totals") or {}
+        out["progress"] = run.get("progress")
+        if out["status"] in ("queued", "running"):
+            out["cancelling"] = repo.cancel_requested(run["id"])
         out["files"] = len(run.get("outputs") or [])
         if with_log:
             out["log"] = run.get("log") or []
             out["outputs"] = run.get("outputs") or []
+            out["summary"] = run.get("summary") or []
         return out
 
     @app.post("/api/runs", status_code=202, dependencies=[Depends(changing)])
@@ -287,18 +334,48 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
             raise HTTPException(409, "A run is already in progress for this church")
         run = repo.create_run("manual", started_by=who["name"])
         launcher.launch(repo.org_id, run["id"])
-        return public_run(run, with_log=False)
+        return public_run(run, with_log=False, repo=repo)
 
     @app.get("/api/runs")
     def list_runs(repo: TenantRepo = Depends(church_repo)):
-        return {"runs": [public_run(r, with_log=False) for r in repo.runs()]}
+        return {"runs": [public_run(r, with_log=False, repo=repo) for r in repo.runs()]}
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str, repo: TenantRepo = Depends(church_repo)):
         run = repo.run(run_id)
         if run is None:
             raise HTTPException(404, "Run not found")
-        return public_run(run, with_log=True)
+        return public_run(run, with_log=True, repo=repo)
+
+    @app.post("/api/runs/{run_id}/cancel", dependencies=[Depends(changing)])
+    def cancel_run(run_id: str, repo: TenantRepo = Depends(church_repo)):
+        run = repo.run(run_id)
+        if run is None:
+            raise HTTPException(404, "Run not found")
+        if run["status"] not in ("queued", "running"):
+            raise HTTPException(409, "That run has already finished")
+        repo.request_cancel(run_id)
+        return public_run(run, with_log=False, repo=repo)
+
+    # ── A sample roster for the report being set up ───────────────────────────
+    @app.post("/api/preview/roster", dependencies=[Depends(changing)])
+    def preview_roster(body: PreviewRequest, repo: TenantRepo = Depends(church_repo)):
+        draft = {"id": "preview", "label": "Sample class", "pco_event": "Sample", **body.report}
+        draft["id"] = "preview"
+        if draft.get("show_route") and not draft.get("route_source_event"):
+            draft["route_source_event"] = "Sample"
+        try:
+            (spec,) = checkin_reports.parse([draft])
+        except ReportConfigError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        church = checkin_reports.church_config(repo.org_id, repo.church(), None, repo.logo_path())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = generate_roster_pdf(
+                mock_roster(spec.label, show_route=spec.show_route), spec.pdf_subtitle, f"{tmp}/preview.pdf",
+                RenderContext.for_church(church, spec.default_theme),
+                show_route=spec.show_route, attendance_summary=spec.attendance_summary, hide=spec.hide)
+            pdf = Path(path).read_bytes()
+        return Response(pdf, media_type="application/pdf", headers={"Cache-Control": "private, no-store"})
 
     @app.get("/api/runs/{run_id}/files/{file_path:path}")
     def run_file(run_id: str, file_path: str, repo: TenantRepo = Depends(church_repo)):
@@ -315,9 +392,34 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
         response.delete_cookie(session.COOKIE)
         return {"ok": True}
 
+    # ── The weekly schedule ───────────────────────────────────────────────────
+    @app.post("/internal/dispatch", include_in_schema=False)
+    def internal_dispatch(x_ar_dispatch_key: str = Header(default="")):
+        if not settings.dispatch_key or not secrets.compare_digest(x_ar_dispatch_key, settings.dispatch_key):
+            raise HTTPException(404, "Not found")
+        return {"started": len(scheduling.dispatch(settings, store, launcher, datetime.now(UTC)))}
+
+    if local_server and settings.dev_login:
+        # No Cloud Scheduler on a developer's machine: check the schedule here once a minute.
+        def tick() -> None:
+            while True:
+                time.sleep(60)
+                with_errors_ignored(lambda: scheduling.dispatch(settings, store, launcher, datetime.now(UTC)))
+        threading.Thread(target=tick, daemon=True, name="local-schedule").start()
+
     # ── The dashboard page ────────────────────────────────────────────────────
     @app.get("/", include_in_schema=False)
     def index():
         return FileResponse(_STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+    class Assets(StaticFiles):
+        """Static files that browsers re-check on every load, so a new version shows at once."""
+
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
+
+    app.mount("/static", Assets(directory=_STATIC), name="static")
 
     return app

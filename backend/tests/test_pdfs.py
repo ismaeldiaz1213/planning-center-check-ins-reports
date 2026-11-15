@@ -208,3 +208,68 @@ class TestChurchConfig:
         for bad in ({"language": "fr"}, {"theme": "otoño"}, {"timezone": "Mars/Olympus"}, {"org_id": " "}):
             with pytest.raises(Exception):  # noqa: B017 — ValueError or ZoneInfoNotFoundError
                 ChurchConfig(**{**ok, **bad})
+
+
+class TestGuideLanguages:
+    """A church can choose which check-in guides its instructions bundle carries."""
+
+    def _pages(self, tmp_path, ctx, name):
+        return len(PdfReader(build_instructions_pdf(str(tmp_path / name), ctx)).pages)
+
+    def test_english_church_can_have_both_guides(self, tmp_path):
+        both = RenderContext(texts=EN, branding=Branding(guide_languages=("en", "es")))
+        only = RenderContext(texts=EN, branding=Branding())
+        es_pages = len(PdfReader(guides(ES, ("es",))[0][1]).pages)
+        assert self._pages(tmp_path, both, "both.pdf") == self._pages(tmp_path, only, "en.pdf") + es_pages
+        cover = PdfReader(str(tmp_path / "both.pdf")).pages[0].extract_text()
+        assert "Full guide in English" in cover and "Guía completa en español" in cover
+        assert instructions_fingerprint(both) != instructions_fingerprint(only)
+
+    def test_spanish_church_can_have_spanish_only(self, tmp_path):
+        only = RenderContext(texts=ES, branding=Branding(guide_languages=("es",)))
+        default = RenderContext(texts=ES, branding=Branding())
+        assert self._pages(tmp_path, only, "es.pdf") < self._pages(tmp_path, default, "default.pdf")
+
+    def test_default_is_unchanged(self):
+        assert [label for label, _ in guides(ES)] == ["Guía completa en español", "Full guide in English"]
+        assert [label for label, _ in guides(EN)] == ["Full guide"]
+
+    def test_bad_choices_are_refused(self):
+        for bad in ((), ("fr",), ("es", "klingon")):
+            with pytest.raises(ValueError):
+                Branding(guide_languages=bad)
+
+
+class TestHiddenColumns:
+    """A report can leave columns and sections off its rosters (ReportSpec.hide)."""
+
+    def _text(self, tmp_path, name, **kw):
+        return text_of(generate_roster_pdf(mock_roster("Clase Primaria"), "Escuela Dominical",
+                                           str(tmp_path / name), CTX, show_route=True,
+                                           attendance_summary=True, **kw))
+
+    def test_nothing_hidden_is_the_same_as_before(self, tmp_path):
+        assert self._text(tmp_path, "a.pdf") == self._text(tmp_path, "b.pdf", hide=())
+
+    def test_columns_disappear(self, tmp_path):
+        full = self._text(tmp_path, "full.pdf")
+        slim = self._text(tmp_path, "slim.pdf", hide=("birthday", "phone", "address", "grade"))
+        for header in ("Cumpleaños", "Teléfono", "Dirección", "Grado"):
+            assert header in full and header not in slim
+        assert "Nombre" in slim and "Chalott" in slim and "(281) 444-4736" not in slim
+
+    def test_sections_disappear(self, tmp_path):
+        full = self._text(tmp_path, "full.pdf")
+        slim = self._text(tmp_path, "slim.pdf", hide=("parents", "workers", "inactive", "summary"))
+        for words in ("Padre/Tutor:", "Maestros y ayudantes", "Hace tiempo que no viene"):
+            assert words in full and words not in slim
+
+    def test_everything_hidden_still_renders_names(self, tmp_path):
+        from planning_center_reports.reports import HIDEABLE
+        assert "Chalott" in self._text(tmp_path, "bare.pdf", hide=HIDEABLE)
+
+    def test_report_spec_validates_hide(self):
+        from planning_center_reports.reports import ReportSpec
+        assert ReportSpec(id="a", label="A", pco_event="A", hide=["phone", "phone"]).hide == ("phone",)
+        with pytest.raises(ValueError):
+            ReportSpec(id="a", label="A", pco_event="A", hide=["shoe_size"])

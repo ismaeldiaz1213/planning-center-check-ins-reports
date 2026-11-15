@@ -181,8 +181,8 @@ AR_DEV_LOGIN=1 uvicorn advanced_reports.app:create_app --factory --port 8000
 
 `AR_DEV_LOGIN=1` adds two sign-in buttons that skip Planning Center sign-in:
 
-- **Grace Community Church**: a made-up English church (`advanced_reports/demo.py`). No
-  network, no real people.
+- **Liberty Baptist Church**: sample data in English (`advanced_reports/demo.py`). Only the
+  church's name is real; no network, no real people.
 - **Iglesia Bautista Libertad**: shown only when `.env` has `PCO_APP_ID` / `PCO_SECRET`.
   It imports `.env` + `reports.yaml` as a church and reads live Planning Center data.
   Nothing is uploaded to Google Drive; the PDFs stay on this machine.
@@ -190,6 +190,10 @@ AR_DEV_LOGIN=1 uvicorn advanced_reports.app:create_app --factory --port 8000
 Everything it stores goes under `out/platform-data/` (gitignored): settings and run history
 as JSON, the Planning Center token encrypted, and each run's PDFs. Delete that folder to
 start over. Never set `AR_DEV_LOGIN` on a deployed server.
+
+The pages are plain files in `advanced_reports/static/` (`index.html`, `app.css`, `app.js`,
+`i18n.js`); there is no build step, so edit and reload. The home page's sample pictures
+come from `python -m advanced_reports.make_samples` (needs `pdftoppm`).
 
 Tests: `pytest tests/platform`.
 

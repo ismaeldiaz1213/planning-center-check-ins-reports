@@ -85,43 +85,59 @@ def _grade_label(m: Member, texts: Catalog) -> str:
     return _resolve_grade(grade, m.birthday, texts)
 
 
-def _main_columns(show_route: bool, texts: Catalog) -> list[Column]:
-    t = texts.t
-    cols = [
-        Column("", 14),
-        Column(t("col.first_name"), 96),
-        Column(t("col.last_name"), 100),
-        Column(t("col.birthday"), 62),
-        Column(t("col.phone"), 82),
-        Column(t("col.grade"), 42),
-    ]
-    if show_route:
-        cols.append(Column(t("col.route"), 46))
-    cols += [Column(t("col.attendance"), 50), Column(t("col.added"), 54)]
-    cols.append(Column(t("col.address"), 720 - sum(c.width for c in cols)))
+TABLE_WIDTH = 720      # hidden columns are named in reports.HIDEABLE
+
+
+def _fit(keyed: list[tuple[str, Column]], hide) -> list[Column]:
+    """Drop hidden columns; the last one left takes whatever width remains
+    (with nothing hidden that is the address column, exactly as before)."""
+    cols = [col for key, col in keyed if key not in hide]
+    cols[-1] = Column(cols[-1].header, TABLE_WIDTH - sum(c.width for c in cols[:-1]), cols[-1].align)
     return cols
 
 
-def _main_row(roster: LocationRoster, m: Member, show_route: bool, texts: Catalog) -> Row:
-    bday  = _fmt_birthday(m.birthday)
-    grade = _grade_label(m, texts)
-    cells = [
-        Cell(),
-        Cell(m.first_name, warn=not m.first_name, style="bold"),
-        Cell(m.last_name, warn=not m.last_name),
-        Cell(bday, warn=not bday),
-        Cell(m.phone, warn=not m.phone and not m.guardian),
-        Cell(grade, warn=_is_minor(m.birthday) and not grade),
+def _keep(keyed: list[tuple[str, Cell]], hide) -> list[Cell]:
+    return [cell for key, cell in keyed if key not in hide]
+
+
+def _main_columns(show_route: bool, texts: Catalog, hide=()) -> list[Column]:
+    t = texts.t
+    keyed = [
+        ("", Column("", 14)),
+        ("", Column(t("col.first_name"), 96)),
+        ("", Column(t("col.last_name"), 100)),
+        ("birthday", Column(t("col.birthday"), 62)),
+        ("phone", Column(t("col.phone"), 82)),
+        ("grade", Column(t("col.grade"), 42)),
     ]
     if show_route:
-        cells.append(Cell(short_route(m.route), style="muted"))
-    cells.append(Cell(style="meter", meter=(m.attended, m.window)))
+        keyed.append(("", Column(t("col.route"), 46)))
+    keyed += [("attendance", Column(t("col.attendance"), 50)), ("added", Column(t("col.added"), 54)),
+              ("address", Column(t("col.address"), 0))]
+    return _fit(keyed, hide)
+
+
+def _main_row(roster: LocationRoster, m: Member, show_route: bool, texts: Catalog, hide=()) -> Row:
+    bday  = _fmt_birthday(m.birthday)
+    grade = _grade_label(m, texts)
+    keyed = [
+        ("", Cell()),
+        ("", Cell(m.first_name, warn=not m.first_name, style="bold")),
+        ("", Cell(m.last_name, warn=not m.last_name)),
+        ("birthday", Cell(bday, warn=not bday)),
+        ("phone", Cell(m.phone, warn=not m.phone and not m.guardian)),
+        ("grade", Cell(grade, warn=_is_minor(m.birthday) and not grade)),
+    ]
+    if show_route:
+        keyed.append(("", Cell(short_route(m.route), style="muted")))
+    keyed.append(("attendance", Cell(style="meter", meter=(m.attended, m.window))))
     if roster.is_recent(m):
-        cells.append(Cell(texts.short_date(m.date_added), style="chip", color=ACCENT_OK))
+        keyed.append(("added", Cell(texts.short_date(m.date_added), style="chip", color=ACCENT_OK)))
     else:
-        cells.append(Cell(texts.short_date(m.date_added), style="muted"))
-    cells.append(Cell(_short_address(m.address), warn=_is_bad_address(m.address)))
-    return Row(cells=cells, marker=m.is_new, sub=_guardian_line(m, texts))
+        keyed.append(("added", Cell(texts.short_date(m.date_added), style="muted")))
+    keyed.append(("address", Cell(_short_address(m.address), warn=_is_bad_address(m.address))))
+    return Row(cells=_keep(keyed, hide), marker=m.is_new,
+               sub=None if "parents" in hide else _guardian_line(m, texts))
 
 
 def _resumen(page: Page, roster: LocationRoster, show_route: bool, attendance_summary: bool) -> None:
@@ -151,8 +167,13 @@ def _resumen(page: Page, roster: LocationRoster, show_route: bool, attendance_su
 
 
 def generate_roster_pdf(roster: LocationRoster, subtitle: str, filename: str, ctx: RenderContext,
-                        show_route: bool = False, attendance_summary: bool = False) -> str:
-    """Write Roster.pdf for one location and return `filename`."""
+                        show_route: bool = False, attendance_summary: bool = False,
+                        hide: tuple[str, ...] = ()) -> str:
+    """Write Roster.pdf for one location and return `filename`.
+
+    `hide` lists the columns and sections (see HIDEABLE) this church leaves off.
+    """
+    hide = frozenset(hide)
     texts = ctx.texts
     t = texts.t
     weeks = len(roster.sundays)
@@ -163,53 +184,57 @@ def generate_roster_pdf(roster: LocationRoster, subtitle: str, filename: str, ct
     # ── Lista ──
     draw_section(page, t("roster.list"), len(roster.active),
                  note=t("roster.list.note", weeks=weeks), keep_with=40)
-    draw_table(page, _main_columns(show_route, texts),
-               [_main_row(roster, m, show_route, texts) for m in roster.active],
+    draw_table(page, _main_columns(show_route, texts, hide),
+               [_main_row(roster, m, show_route, texts, hide) for m in roster.active],
                empty_text=t("roster.list.empty"))
 
     # ── Maestros y ayudantes ──
-    if roster.workers:
+    if roster.workers and "workers" not in hide:
         draw_section(page, t("roster.workers"), len(roster.workers),
                      note=t("roster.workers.note"), keep_with=40)
-        draw_table(page, [
-            Column("", 14), Column(t("col.first_name"), 120), Column(t("col.last_name"), 130),
-            Column(t("col.phone"), 100), Column(t("col.attendance"), 70), Column(t("col.last_seen"), 70),
-        ], [
-            Row(cells=[
-                Cell(), Cell(m.first_name, style="bold"), Cell(m.last_name),
-                Cell(m.phone, warn=not m.phone), Cell(style="meter", meter=(m.attended, m.window)),
-                Cell(texts.short_date(m.last_seen), style="muted"),
-            ]) for m in roster.workers
+        draw_table(page, [col for key, col in [
+            ("", Column("", 14)), ("", Column(t("col.first_name"), 120)), ("", Column(t("col.last_name"), 130)),
+            ("phone", Column(t("col.phone"), 100)), ("attendance", Column(t("col.attendance"), 70)),
+            ("", Column(t("col.last_seen"), 70)),
+        ] if key not in hide], [
+            Row(cells=_keep([
+                ("", Cell()), ("", Cell(m.first_name, style="bold")), ("", Cell(m.last_name)),
+                ("phone", Cell(m.phone, warn=not m.phone)),
+                ("attendance", Cell(style="meter", meter=(m.attended, m.window))),
+                ("", Cell(texts.short_date(m.last_seen), style="muted")),
+            ], hide)) for m in roster.workers
         ])
 
     # ── Hace tiempo que no viene ──
-    if roster.inactive:
+    if roster.inactive and "inactive" not in hide:
         draw_section(page, t("roster.inactive"), len(roster.inactive), accent=ACCENT_WARN,
                      note=t("roster.inactive.note", date=since, weeks=weeks), keep_with=40)
-        cols = [Column("", 14), Column(t("col.first_name"), 96), Column(t("col.last_name"), 100),
-                Column(t("col.phone"), 82)]
+        keyed = [("", Column("", 14)), ("", Column(t("col.first_name"), 96)), ("", Column(t("col.last_name"), 100)),
+                 ("phone", Column(t("col.phone"), 82))]
         if show_route:
-            cols.append(Column(t("col.route"), 46))
-        cols += [Column(t("col.last_seen"), 58), Column(t("col.weeks"), 50, "center"),
-                 Column(t("col.times"), 42, "center")]
-        cols.append(Column(t("col.address"), 720 - sum(c.width for c in cols)))
+            keyed.append(("", Column(t("col.route"), 46)))
+        keyed += [("", Column(t("col.last_seen"), 58)), ("", Column(t("col.weeks"), 50, "center")),
+                  ("", Column(t("col.times"), 42, "center")), ("address", Column(t("col.address"), 0))]
+        cols = _fit(keyed, hide)
         rows = []
         for m in roster.inactive:
-            cells = [Cell(), Cell(m.first_name, style="bold"), Cell(m.last_name),
-                     Cell(m.phone, warn=not m.phone and not m.guardian)]
+            cells = [("", Cell()), ("", Cell(m.first_name, style="bold")), ("", Cell(m.last_name)),
+                     ("phone", Cell(m.phone, warn=not m.phone and not m.guardian))]
             if show_route:
-                cells.append(Cell(short_route(m.route), style="muted"))
+                cells.append(("", Cell(short_route(m.route), style="muted")))
             cells += [
-                Cell(texts.short_date(m.last_seen)),
-                Cell(str(m.weeks_absent)),
-                Cell(str(m.times_total), style="muted"),
-                Cell(_short_address(m.address), warn=_is_bad_address(m.address)),
+                ("", Cell(texts.short_date(m.last_seen))),
+                ("", Cell(str(m.weeks_absent))),
+                ("", Cell(str(m.times_total), style="muted")),
+                ("address", Cell(_short_address(m.address), warn=_is_bad_address(m.address))),
             ]
-            rows.append(Row(cells=cells, sub=_guardian_line(m, texts)))
+            rows.append(Row(cells=_keep(cells, hide),
+                            sub=None if "parents" in hide else _guardian_line(m, texts)))
         draw_table(page, cols, rows, gap_after=0)
         draw_note(page, t("roster.inactive.legend"))
 
-    _resumen(page, roster, show_route, attendance_summary)
+    if "summary" not in hide:
+        _resumen(page, roster, show_route, attendance_summary)
     draw_feedback_card(page)
     page.save()
     return filename

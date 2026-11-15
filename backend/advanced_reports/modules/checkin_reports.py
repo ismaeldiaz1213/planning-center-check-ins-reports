@@ -20,6 +20,7 @@ def spec_to_dict(spec: ReportSpec) -> dict:
     data["start_date"] = spec.start_date.isoformat() if spec.start_date else None
     data["outputs"] = list(spec.outputs)
     data["demo_locations"] = list(spec.demo_locations)
+    data["hide"] = list(spec.hide)
     return data
 
 
@@ -37,6 +38,8 @@ def church_config(org_id: str, church: dict, module: dict | None, logo_path: str
         language=church["language"],
         theme=church.get("theme") or None,
         branding=Branding(logo_path=logo_path,
+                          guide_languages=tuple(church["instructions_languages"])
+                          if church.get("instructions_languages") else None,
                           **{k: branding.get(k) or "" for k in _BRANDING_FIELDS}),
         drive_parent_folder_id=None,
         reports=parse((module or {}).get("reports") or []) if (module or {}).get("reports") else (),
