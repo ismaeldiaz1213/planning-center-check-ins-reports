@@ -51,7 +51,7 @@ _Last updated: 2026-11-14 (Saturday, late; session paused mid step 3)_
 | Milestone 1 steps 6–7 | ⬜ Not started; blocked on the accounts above |
 | Milestones 2–5 | ⬜ Not started |
 
-**Next action:** owner creates the Planning Center OAuth app and the GCP projects (§7); then the Firestore store, Google Drive connection, dispatch, `Dockerfile.app` and deploy. Production baseline still needs `gcloud auth login` on the **IBL** account.
+**Next action:** the owner works through Phase 1 of [`docs/launch-guide.md`](launch-guide.md) (accounts, secrets, OAuth apps). The next session starts at Phase 2 there: Firestore store and deploy to staging first.
 
 ### Steps 4–5: platform running locally (2026-11-14)
 
