@@ -141,7 +141,7 @@ class TestSundayCounts:
         cks = [checkin("a", 0), checkin("a", 6), checkin("a", 7), checkin("b", 7)]
         r = build(cks, [person("a"), person("b")])["3rd Grade Girls"]
         assert len(r.sundays) == 6
-        assert r.sundays[-1].label == PERIODS[7].label
+        assert r.sundays[-1].day == PERIODS[7].local_date
         assert (r.sundays[-1].regular, r.sundays[-1].visitors) == (1, 1)
         assert r.sundays[-2].total == 1
 

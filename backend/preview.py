@@ -21,13 +21,13 @@ import argparse
 import os
 import subprocess
 
-import planning_center_reports.config as config
-from planning_center_reports.config import RUTAS_SUBTITLE
+from planning_center_reports import legacy
+from planning_center_reports.legacy import get_report
 from planning_center_reports.mock_data import mock_roster, mock_volunteers
 from planning_center_reports.pdf.instructions import build_instructions_pdf
 from planning_center_reports.pdf.rosters import generate_roster_pdf
 from planning_center_reports.pdf.volunteers import generate_volunteer_pdf
-from planning_center_reports.reports import ReportConfigError, get_report
+from planning_center_reports.reports import ReportConfigError
 
 THEMES_AVAILABLE = [None, "primavera", "verano", "otono", "invierno"]
 THEME_LABELS = {
@@ -89,9 +89,7 @@ def main():
         generated.append(path)
 
     for theme_key in themes_to_run:
-        # Set the active theme on the shared config module — all PDF functions
-        # pick it up automatically via config.T().
-        config._theme = config.THEMES[theme_key]
+        ctx = legacy.render_context(theme_key)
         slug = theme_key or "default"
         print(f"\n── {THEME_LABELS[theme_key]} ──")
 
@@ -100,30 +98,31 @@ def main():
             # the configured report, driven by mock data.
             location = spec.demo_locations[0] if spec.demo_locations else spec.label
             path = os.path.join(out_dir, f"{slug}_{spec.id}_Roster.pdf")
-            generate_roster_pdf(mock_roster(location, spec.show_route), spec.pdf_subtitle, path,
+            generate_roster_pdf(mock_roster(location, spec.show_route), spec.pdf_subtitle, path, ctx,
                                 show_route=spec.show_route, attendance_summary=spec.attendance_summary)
             emit(path)
             if spec.volunteer_report:
                 path = os.path.join(out_dir, f"{slug}_{spec.id}_Voluntarios.pdf")
-                emit(generate_volunteer_pdf(mock_volunteers(), spec.label, path))
+                emit(generate_volunteer_pdf(mock_volunteers(), spec.label, path, ctx))
             continue
 
         if args.type in ("roster", "all"):
             path = os.path.join(out_dir, f"{slug}_Roster.pdf")
-            emit(generate_roster_pdf(mock_roster("Ruta 1 - Bus", show_route=False), RUTAS_SUBTITLE, path))
+            emit(generate_roster_pdf(mock_roster("Ruta 1 - Bus", show_route=False),
+                                     legacy.setting("RUTAS_SUBTITLE"), path, ctx))
 
         if args.type in ("escuela", "all"):
             path = os.path.join(out_dir, f"{slug}_Escuela-Roster.pdf")
-            emit(generate_roster_pdf(mock_roster("Clase Primaria"), "Escuela Dominical", path,
+            emit(generate_roster_pdf(mock_roster("Clase Primaria"), "Escuela Dominical", path, ctx,
                                      show_route=True, attendance_summary=True))
 
         if args.type in ("voluntarios", "all"):
             path = os.path.join(out_dir, f"{slug}_Voluntarios.pdf")
-            emit(generate_volunteer_pdf(mock_volunteers(), "Escuela Dominical", path))
+            emit(generate_volunteer_pdf(mock_volunteers(), "Escuela Dominical", path, ctx))
 
     if args.type in ("instrucciones", "all") and not spec:
         print("\n── Instrucciones ──")
-        emit(build_instructions_pdf(os.path.join(out_dir, "Instrucciones.pdf")))
+        emit(build_instructions_pdf(os.path.join(out_dir, "Instrucciones.pdf"), legacy.render_context()))
 
     print(f"\nAll previews saved to: {out_dir}/")
 

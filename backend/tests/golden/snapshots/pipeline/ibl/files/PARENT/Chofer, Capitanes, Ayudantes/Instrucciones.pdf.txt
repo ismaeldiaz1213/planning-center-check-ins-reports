@@ -1,0 +1,204 @@
+pages: 14
+==== page 1 of 14 ====
+PLANNING CENTER CHECK-INS
+Cómo registrar asistencia
+How to check people in
+PARA VOLUNTARIOS DE RUTAS Y ESCUELA DOMINICAL  ·  FOR BUS ROUTE & SUNDAY SCHOOL VOLUNTEERS
+EN 3 PASOS  ·  IN 3 STEPS
+1
+Abre Check-Ins y busca tu lista
+Open Check-Ins and find your roster
+Usa la estación de lista (Roster Station) de tu ruta o clase.
+2
+Toca el nombre y espera 2 segundos
+Tap the name and wait 2 seconds
+Pasa de "Ready" a "Here": el check-in está listo.
+3
+¿No aparece? Búscalo afuera de tu lista
+Not there? Search outside your roster
+Search › "outside of roster". Si es nuevo: Add person.
+ Mira el video
+ Watch the video
+Escanea con la cámara o toca aquí
+RESUMEN RÁPIDO  ·  QUICK REFERENCE
+SITUACIÓN · SITUATION QUÉ HACER · WHAT TO DO
+Está en mi lista
+On my roster
+Toca su nombre › espera › confirma que pasó a "Here"
+No está en mi lista, pero sí en el sistema
+Not on my roster, but in the system
+Search › "outside of roster" › toca su nombre
+Persona completamente nueva
+Brand-new visitor
+Add person › New o Existing Household › llena datos › búscala y regístrala
+¿Nombres duplicados o dudas?
+Anota el nombre y habla con Hna. Lira — cuarto de impresoras.
+¿Algo confuso o que no funciona? Cuéntanos.
+Escanea el código o toca aquí: entre más nos digas, mejor lo arreglamos.
+EN ESTE DOCUMENTO  ·  IN THIS DOCUMENT
+Guía completa en español
+pág. 2
+Full guide in English
+pág. 8
+Video: https://drive.google.com/file/d/1yTSZM-FTPZHbKlRrMizAm06eUM-E6Mc4/view
+Comentarios: https://docs.google.com/forms/d/e/1FAIpQLSfSflUQmzCsL1TekFt_lQVCddGIInJw0QRoBjE8f6VrX0Hz6g/viewform
+[link] https://docs.google.com/forms/d/e/1FAIpQLSfSflUQmzCsL1TekFt_lQVCddGIInJw0QRoBjE8f6VrX0Hz6g/viewform
+[link] https://drive.google.com/file/d/1yTSZM-FTPZHbKlRrMizAm06eUM-E6Mc4/view
+[drawing] 6e6c1981b578334b
+==== page 2 of 14 ====
+Guía de Check-In — Planning Center Check-Ins
+  Guía de Check-In✅
+Planning Center Check-Ins
+Para voluntarios de Ruta y Escuela Dominical
+  Esta guía te explica paso a paso cómo registrar asistencia desde tu teléfono usando una estación de lista 💡
+(Roster Station).
+Parte 1 — Registrar a alguien en tu lista
+Cuando la persona ya aparece en tu lista, el proceso es muy sencillo:
+1. Abre la aplicación Check-Ins en tu teléfono. Verás la lista de personas asignadas a tu grupo.
+2. Busca el nombre de la persona y tócalo para seleccionarla. Aparecerá una marca de verificación ( ).✔
+3. Espera dos segundos. La persona desaparecerá de la columna "Ready" y pasará a la columna "Here",
+confirmando que el check-in fue exitoso.
+[drawing] 63ed0cfb15c619fc
+==== page 3 of 14 ====
+Guía de Check-In — Planning Center Check-Ins
+  ¡Listo! Una vez que la persona está en la columna "Here", el check-in está completo.✅
+  ¿La persona no aparece en tu lista? Continúa a la Parte 2.⚠️
+Parte 2 — Registrar a alguien que no está en tu lista
+Si una persona visita tu ruta o clase y no aparece en tu lista, puedes buscarla en el sistema completo de la
+iglesia.
+1. Toca la barra de búsqueda "Search" y escribe el nombre completo de la persona.
+[drawing] 865406c98b13540e
+==== page 4 of 14 ====
+Guía de Check-In — Planning Center Check-Ins
+2. Si la persona aparece en el roster, la verás en los resultados. Si no aparece, selecciona "Search
+[nombre] outside of roster" para buscarla en todo el sistema de la iglesia.
+3. Si la persona existe en el sistema, aparecerán los resultados. Selecciona su nombre para agregarla al
+check-in. Espera dos segundos y pasará a la columna "Here".
+  Nombres duplicados: A veces dos personas tienen el mismo nombre y no es posible distinguirlas desde la ⚠️
+aplicación. La imagen de abajo muestra un ejemplo de este caso. Si esto te ocurre, anota el nombre, ve al cuarto
+de impresoras y habla con la Hna. Lira — ella te ayudará a resolverlo desde la computadora del cuarto.
+[drawing] 247188395e4355a7
+==== page 5 of 14 ====
+Guía de Check-In — Planning Center Check-Ins
+  ¿La persona no aparece en ningún resultado? Es posible que sea completamente nueva en el sistema. ⚠️
+Continúa a la Parte 3.
+Parte 3 — Registrar a un visitante nuevo
+Si la persona nunca ha sido registrada en el sistema de la iglesia, deberás crear un registro nuevo. Primero, un
+concepto importante:
+¿Qué es un "Household" (Hogar)?
+Un household es el grupo familiar con el que una persona está registrada en Planning Center. Al
+registrar a alguien nuevo, debes indicar si pertenece a una familia completamente nueva o a una
+familia que ya existe en el sistema.
+1. Sigue los pasos 1 y 2 de la Parte 2. Si la persona no aparece en ningún resultado, selecciona "Add
+person".
+[drawing] b7c43ee7983b0510
+==== page 6 of 14 ====
+Guía de Check-In — Planning Center Check-Ins
+2. Aparecerán dos opciones:  "New Household"  y  "Existing Household".
+Opción A — New Household (Familia completamente nueva)
+Selecciona "New Household" si la persona y su familia nunca han asistido a la iglesia.
+3. Llena el formulario con el nombre, apellido y demás información de la persona. Los campos
+marcados son obligatorios.
+Opción B — Existing Household (Familia ya registrada)
+Selecciona "Existing Household" si otros miembros de la familia ya están en el sistema y solo esta
+persona es nueva.
+1. Escribe el apellido de la familia en el buscador y selecciona el hogar correcto de la lista.
+[drawing] a963c4f687441867
+==== page 7 of 14 ====
+Guía de Check-In — Planning Center Check-Ins
+2. Completa los datos de la persona nueva y toca "Save".
+  Ingresa siempre el nombre correctamente. Esto ayuda a mantener los datos limpios y a identificar a esta 💡
+persona en visitas futuras.
+Resumen Rápido
+Situación Qué hacer
+Persona está en mi lista Toca su nombre → Espera → Confirmar que pasó a "Here" (Parte 1)
+No está en mi lista, pero sí está
+en el sistema
+Buscar ( ) → Seleccionar nombre → Confirmar (Parte 2)🔍
+Persona completamente nueva Buscar → Add person → Elegir New o Existing Household → Llenar
+datos (Parte 3)
+¡Gracias por servir!
+Si tienes alguna duda, comunícate con el coordinador de tu área.
+[drawing] 7b14097decdd76e0
+==== page 8 of 14 ====
+Check-In Guide — Planning Center Check-Ins
+  Check-In Guide✅
+Planning Center Check-Ins
+For Bus Route & Sunday School Volunteers
+  This guide walks you through how to record attendance from your phone using a Roster Station.💡
+Please note that if you are taking attendance through Check-Ins, you no longer have to take attendance
+through Groups. This will be the new way to
+Part 1 — Check In Someone on Your List
+If the person already appears on your roster, the process is quick and straightforward:
+1. Open the Check-Ins app on your phone. You'll see the list of people assigned to your group.
+2. Find the person's name and tap it to select them. A checkmark ( ) will appear next to their name.✔
+3. Wait about two seconds. The person will move from the "Ready" column to the "Here" column, confirming
+the check-in was successful.
+[drawing] 90b46d669cb709a1
+==== page 9 of 14 ====
+Check-In Guide — Planning Center Check-Ins
+  That's it! Once the person appears in the "Here" column, their check-in is complete.✅
+  Can't find the person on your list? Continue to Part 2.⚠️
+Part 2 — Check In Someone Not on Your List
+If a person is visiting your route or class and doesn't appear on your roster, you can search for them in the
+church's full system.
+1. Tap the "Search" bar and type the person's full name.
+[drawing] bdba63eae6c1cf7e
+==== page 10 of 14 ====
+Check-In Guide — Planning Center Check-Ins
+2. If the person is on the roster, they'll show up in the results. If not, tap "Search [name] outside of roster" to
+search the entire church system.
+3. If the person exists in the system, their name will appear in the results. Tap it to add them to check-in. Wait
+two seconds and they'll move to the "Here" column.
+  Duplicate names: Sometimes two people share the same name and there's no way to tell them apart in the ⚠️
+app. The image below shows an example of this. If this happens, write down the name and head to the printer
+room — talk to Hna. Lira and she'll help you sort it out from the computer there.
+[drawing] d3d6ff40ae166e02
+==== page 11 of 14 ====
+Check-In Guide — Planning Center Check-Ins
+  Person doesn't show up in any search results? They may be brand new to the system (i.e. a visitor).⚠️
+Continue to Part 3.
+Part 3 — Register a Brand New Visitor
+If the person has never been registered in the church system, you'll need to create a new record for them. First,
+one important concept:
+What is a "Household"?
+A household is the family group a person is registered under in Planning Center. When adding
+someone new, you'll need to indicate whether they belong to a completely new family or to a family
+that already exists in the system.
+1. Follow steps 1 and 2 from Part 2. If the person doesn't appear in any results, tap "Add person".
+[drawing] 49512a21f23a9604
+==== page 12 of 14 ====
+Check-In Guide — Planning Center Check-Ins
+2. You'll see two options: "New Household" and "Existing Household".
+Option A — New Household (Brand new family)
+Select "New Household" if the person and their family have never attended the church before.
+3. Fill in the form with the person's first name, last name, and any other required fields.
+4. Once you've filled in their information, tap "Add Household" to save.
+5. Now go back and search for the person using the regular search method from Part 2 and
+check them in from there.
+[drawing] 97f3221f4594ab61
+==== page 13 of 14 ====
+Check-In Guide — Planning Center Check-Ins
+Option B — Existing Household (Family already in the system)
+Select "Existing Household" if other family members are already in the system and only this
+specific person is new.
+1. Type the family's last name in the search bar and select the correct household from the list.
+2. Fill in the new person's information and tap "Save" to add them to the household.
+3. Now go back and search for the person using the regular search method from Part 2 and
+check them in from there.
+  Always enter the name correctly. This keeps your data clean and makes it easier to recognize this person on 💡
+future visits.
+Quick Reference
+Situation What to Do
+Person is on my roster Tap their name → Wait → Confirm they moved to "Here" (Part 1)
+Not on my list, but in the
+system
+Search ( ) → Tap name → Confirm check-in (Part 2)🔍
+Brand new visitor Search → Add person → New or Existing Household → Fill info → Go
+[drawing] 1ab6f0df326dc2f4
+==== page 14 of 14 ====
+Check-In Guide — Planning Center Check-Ins
+back and check in via Part 2 (Part 3)
+Thank you for serving!
+If you have any questions, reach out to your area coordinator.
+[drawing] 069df02ac1387646

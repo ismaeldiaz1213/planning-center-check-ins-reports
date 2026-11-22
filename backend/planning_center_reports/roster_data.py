@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from statistics import mean
 
-from planning_center_reports.config import MESES_ABREV
 from planning_center_reports.pco_client import _parse_ts, age_from_birthday, person_details
 
 VOLUNTEER_KIND = "Volunteer"
@@ -42,15 +41,6 @@ class Period:
     def local_date(self) -> date:
         return self.starts_at.astimezone(self.tz).date()
 
-    @property
-    def label(self) -> str:
-        """Short Spanish label, e.g. "Oct 11"."""
-        return short_date(self.local_date)
-
-
-def short_date(d: date | None) -> str:
-    return f"{MESES_ABREV[d.month]} {d.day}" if d else ""
-
 
 @dataclass
 class Member:
@@ -60,7 +50,8 @@ class Member:
     phone:      str = ""
     address:    str = ""
     birthday:   str = ""
-    grade:      str = ""
+    grade:      str = ""               # ready-made label (mock data); see grade_num
+    grade_num:  int | None = None      # Planning Center's grade number; the PDF labels it
     child:      bool = False
     route:      str = ""
     guardian:   dict | None = None     # {"name", "phone", "address"} for kids
@@ -84,7 +75,7 @@ class Member:
 
 @dataclass
 class SundayCount:
-    label:    str
+    day:      date                     # the PDF formats it in the church's language
     regular:  int
     visitors: int
 
@@ -226,6 +217,7 @@ def build_rosters(
             address=details.get("address", ""),
             birthday=details.get("birthday", ""),
             grade=details.get("grade", ""),
+            grade_num=details.get("grade_num"),
             child=bool(attrs.get("child")),
             route=route_map.get(pid, ""),
             attended=sum(1 for i in at_home if i >= window_first),
@@ -264,7 +256,7 @@ def build_rosters(
         roster.window_start = periods[window_first].local_date
         roster.sundays = [
             SundayCount(
-                label=periods[i].label,
+                day=periods[i].local_date,
                 regular=sum(1 for is_first in presence[name][i] if not is_first),
                 visitors=sum(1 for is_first in presence[name][i] if is_first),
             )
@@ -314,7 +306,7 @@ def _average_clock(arrivals: list[Arrival]) -> str:
 class VolunteerRow:
     person_id: str
     name:      str
-    group:     str
+    group:     str | None          # class or route served; None = not assigned to one
     arrivals:  list[Arrival | None]
 
     @property
@@ -328,7 +320,7 @@ class VolunteerRow:
 
 @dataclass
 class SundayVolunteers:
-    label:   str
+    day:     date
     present: int
     first:   str          # earliest check-in
     average: str          # average check-in
@@ -346,7 +338,7 @@ class VolunteerReport:
         for i, p in enumerate(self.periods):
             arrivals = [r.arrivals[i] for r in self.rows if r.arrivals[i]]
             out.append(SundayVolunteers(
-                label=p.label,
+                day=p.local_date,
                 present=len(arrivals),
                 first=format_clock(min(a.minute_of_day for a in arrivals)) if arrivals else "",
                 average=_average_clock(arrivals),
@@ -377,7 +369,8 @@ def build_volunteer_report(
     Without `min_age`, volunteers are check-ins tagged kind "Volunteer".
     With it, everyone that age or older counts — for a workers-only event such
     as the bus ministry's meeting, where nobody is tagged.
-    `group_of(person_id, location_name)` names the row's group (class/route).
+    `group_of(person_id, location_name)` names the row's group (class/route);
+    None or "" leaves the person unassigned, and those rows sort last.
     Times are reported as-is; no comparison with a scheduled start is made.
     """
     locations, people, _ = index_included(included)
@@ -407,10 +400,10 @@ def build_volunteer_report(
                 f"{c['attributes'].get('first_name', '')} {c['attributes'].get('last_name', '')}".strip()
             )
             group = group_of(pid, loc) if group_of else loc
-            rows[pid] = VolunteerRow(pid, name, group or "Sin asignar", [None] * len(periods))
+            rows[pid] = VolunteerRow(pid, name, group or None, [None] * len(periods))
         prev = rows[pid].arrivals[idx]
         if prev is None or minute_of_day < prev.minute_of_day:
             rows[pid].arrivals[idx] = Arrival(minute_of_day, format_clock(minute_of_day))
 
-    ordered = sorted(rows.values(), key=lambda r: (r.group == "Sin asignar", r.group, r.name.lower()))
+    ordered = sorted(rows.values(), key=lambda r: (r.group is None, r.group or "", r.name.lower()))
     return VolunteerReport(title=title, periods=periods, rows=ordered)

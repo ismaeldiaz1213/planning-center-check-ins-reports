@@ -32,17 +32,11 @@ import re
 
 import requests
 
-import planning_center_reports.config as config  # noqa: F401 — triggers .env loading
-from planning_center_reports.pco_client import (
-    age_from_birthday,
-    get_checkins_for_event_periods,
-    get_event_id,
-    get_event_times,
-    get_location_id,
-    get_locations,
-    get_person_details,
-    get_recent_event_periods,
-)
+from planning_center_reports import legacy  # also loads .env
+from planning_center_reports.pco_client import age_from_birthday
+
+# One Planning Center connection for the whole script, signed in from .env.
+pco = legacy.pco_client()
 
 WEB_BASE = "https://check-ins.planningcenteronline.com"
 BATCH_SIZE = 25  # people per bulk request, matches the PCO web UI's own batching
@@ -115,7 +109,7 @@ def resolve_event_time_id(event_id: str, event_period_id: str, time_str: str) ->
     except ValueError:
         raise Exception(f"--time must be HH:MM (24-hour), got '{time_str}'") from None
 
-    times = get_event_times(event_id, event_period_id)
+    times = pco.get_event_times(event_id, event_period_id)
     for et in times:
         if et["hour"] == hour and et["minute"] == minute:
             return et["id"]
@@ -130,7 +124,7 @@ def filter_by_max_age(members: list, max_age: int) -> list:
     shouldn't silently vanish from the batch)."""
     kept = []
     for m in members:
-        details = get_person_details(m["account_center_person_id"])
+        details = pco.get_person_details(m["account_center_person_id"])
         birthday = details.get("birthday", "")
         if not birthday:
             kept.append(m)
@@ -146,7 +140,7 @@ def filter_by_max_age(members: list, max_age: int) -> list:
 def get_people_seen_at_location(event_id: str, period_ids: list, location_id: str) -> list:
     """Return unique people (id, first_name, last_name) who checked into `location_id`
     during any of `period_ids`."""
-    checkins, included = get_checkins_for_event_periods(event_id, period_ids)
+    checkins, included = pco.get_checkins_for_event_periods(event_id, period_ids)
     person_lookup = {i["id"]: i["attributes"] for i in included if i["type"] == "Person"}
 
     seen = {}
@@ -259,22 +253,22 @@ def main():
     )
     args = parser.parse_args()
 
-    event_id = get_event_id(args.event)
+    event_id = pco.get_event_id(args.event)
 
     if args.list_locations:
-        for loc in get_locations(event_id):
+        for loc in pco.get_locations(event_id):
             print(loc["name"])
         return
 
     if not args.from_location or not args.to_location:
         parser.error("--from-location and --to-location are required (or use --list-locations)")
 
-    period_ids, period_dates, _ = get_recent_event_periods(event_id, weeks=args.weeks)
+    period_ids, period_dates, _ = pco.get_recent_event_periods(event_id, weeks=args.weeks)
     destination_period_id = period_ids[0]  # most recent Sunday
     print(f"Destination Sunday: {period_dates[destination_period_id]} (period {destination_period_id})", flush=True)
 
-    from_location_id = get_location_id(event_id, args.from_location)
-    to_location_id = get_location_id(event_id, args.to_location)
+    from_location_id = pco.get_location_id(event_id, args.from_location)
+    to_location_id = pco.get_location_id(event_id, args.to_location)
 
     members = get_people_seen_at_location(event_id, period_ids, from_location_id)
     if not members:

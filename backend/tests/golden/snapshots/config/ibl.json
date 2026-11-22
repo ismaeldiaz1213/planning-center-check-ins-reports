@@ -1,0 +1,147 @@
+[
+  {
+    "id": "rutas",
+    "label": "Rutas",
+    "pco_event": "Rutas",
+    "subtitle": "Ministerio de Autobuses",
+    "icon": "🚌",
+    "enabled": true,
+    "outputs": [
+      "simple"
+    ],
+    "start_date": null,
+    "history_weeks": 13,
+    "max_history_weeks": 52,
+    "route_source_event": null,
+    "show_route": false,
+    "hide": [],
+    "attendance_summary": false,
+    "instructions": true,
+    "volunteer_report": true,
+    "volunteer_event": "Junta de Rutas Attendance",
+    "volunteer_min_age": 16,
+    "volunteer_weeks": 4,
+    "drive_folder_prefix": null,
+    "default_weeks": 6,
+    "default_theme": null,
+    "demo_locations": [
+      "Ruta 1 - Bus",
+      "Ruta 2 - Van",
+      "Ruta 3 - Carro"
+    ],
+    "derived": {
+      "pdf_subtitle": "Ministerio de Autobuses",
+      "env_prefix": "RUTAS",
+      "resolved_weeks": 6,
+      "resolved_theme": null,
+      "history_start": "2026-07-14",
+      "public_dict": {
+        "id": "rutas",
+        "label": "Rutas",
+        "icon": "🚌",
+        "outputs": [
+          "simple"
+        ],
+        "show_route": false,
+        "default_weeks": 6,
+        "default_theme": ""
+      }
+    }
+  },
+  {
+    "id": "escuela",
+    "label": "Escuela Dominical",
+    "pco_event": "Escuela Dominical",
+    "subtitle": null,
+    "icon": "📚",
+    "enabled": true,
+    "outputs": [
+      "simple"
+    ],
+    "start_date": "2026-08-23",
+    "history_weeks": 26,
+    "max_history_weeks": 52,
+    "route_source_event": "Rutas",
+    "show_route": true,
+    "hide": [],
+    "attendance_summary": true,
+    "instructions": true,
+    "volunteer_report": true,
+    "volunteer_event": null,
+    "volunteer_min_age": 16,
+    "volunteer_weeks": 4,
+    "drive_folder_prefix": null,
+    "default_weeks": 6,
+    "default_theme": null,
+    "demo_locations": [
+      "Clase Primaria",
+      "Clase Secundaria"
+    ],
+    "derived": {
+      "pdf_subtitle": "Escuela Dominical",
+      "env_prefix": "ESCUELA",
+      "resolved_weeks": 6,
+      "resolved_theme": null,
+      "history_start": "2026-08-23",
+      "public_dict": {
+        "id": "escuela",
+        "label": "Escuela Dominical",
+        "icon": "📚",
+        "outputs": [
+          "simple"
+        ],
+        "show_route": true,
+        "default_weeks": 6,
+        "default_theme": ""
+      }
+    }
+  },
+  {
+    "id": "escuela-c",
+    "label": "\"C\" Escuela Dominical",
+    "pco_event": "\"C\" Escuela Dominical",
+    "subtitle": null,
+    "icon": "📗",
+    "enabled": true,
+    "outputs": [
+      "simple"
+    ],
+    "start_date": "2026-09-27",
+    "history_weeks": 26,
+    "max_history_weeks": 52,
+    "route_source_event": "Rutas",
+    "show_route": true,
+    "hide": [],
+    "attendance_summary": true,
+    "instructions": true,
+    "volunteer_report": true,
+    "volunteer_event": null,
+    "volunteer_min_age": 16,
+    "volunteer_weeks": 4,
+    "drive_folder_prefix": "\"C\" Escuela Dominical",
+    "default_weeks": 6,
+    "default_theme": null,
+    "demo_locations": [
+      "\"C\" 7th Boys",
+      "\"C\" 8th Girls"
+    ],
+    "derived": {
+      "pdf_subtitle": "\"C\" Escuela Dominical",
+      "env_prefix": "ESCUELA_C",
+      "resolved_weeks": 6,
+      "resolved_theme": null,
+      "history_start": "2026-09-27",
+      "public_dict": {
+        "id": "escuela-c",
+        "label": "\"C\" Escuela Dominical",
+        "icon": "📗",
+        "outputs": [
+          "simple"
+        ],
+        "show_route": true,
+        "default_weeks": 6,
+        "default_theme": ""
+      }
+    }
+  }
+]

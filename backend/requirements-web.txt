@@ -4,4 +4,7 @@
 # Install with:
 #   pip install -r requirements.txt -r requirements-web.txt
 fastapi
+cryptography        # platform (advanced_reports/): encrypts each church's stored secrets
+google-cloud-firestore  # platform: the production document store (AR_FIRESTORE_PROJECT)
+google-cloud-storage    # platform: run PDFs and logos in a bucket (AR_BUCKET)
 uvicorn[standard]

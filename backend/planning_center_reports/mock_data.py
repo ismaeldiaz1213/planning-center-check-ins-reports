@@ -174,7 +174,7 @@ def mock_roster(location: str, show_route: bool = True):
         history_start=periods[0].local_date,
         history_sundays=_SUNDAYS,
         window_start=periods[_SUNDAYS - _WINDOW].local_date,
-        sundays=[SundayCount(p.label, r, v) for p, (r, v) in zip(
+        sundays=[SundayCount(p.local_date, r, v) for p, (r, v) in zip(
             periods[-_WINDOW:], [(9, 1), (8, 0), (10, 2), (7, 0), (11, 1), (10, 3)], strict=True)],
     )
     for i, a in enumerate(MOCK_ATTENDEES):

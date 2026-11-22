@@ -17,16 +17,12 @@ import sys
 import time
 from pathlib import Path
 
-import planning_center_reports.config as _cfg
+from planning_center_reports import legacy
+from planning_center_reports.legacy import get_report
 from planning_center_reports.mock_data import MOCK_ATTENDEES, mock_roster, mock_volunteers
 from planning_center_reports.pdf.rosters import generate_roster_pdf
 from planning_center_reports.pdf.volunteers import generate_volunteer_pdf
-from planning_center_reports.reports import (
-    OUTPUT_FILENAMES,
-    VOLUNTEERS_FILENAME,
-    ReportConfigError,
-    get_report,
-)
+from planning_center_reports.reports import VALID_THEMES, ReportConfigError
 
 
 def _log(msg: str) -> None:
@@ -43,8 +39,9 @@ def main() -> None:
         _log(f"[DEMO MODE] {exc}")
         sys.exit(1)
 
-    theme_key   = theme_arg if theme_arg in _cfg.THEMES else None
-    _cfg._theme = _cfg.THEMES[theme_key]
+    ctx = legacy.render_context(theme_arg if theme_arg in VALID_THEMES else None)
+    roster_filename = ctx.texts.t("file.roster")
+    volunteers_filename = ctx.texts.t("file.volunteers")
 
     out_dir = Path(__file__).parent / "previews"
     out_dir.mkdir(exist_ok=True)
@@ -86,8 +83,8 @@ def main() -> None:
              f"{roster.new_this_week} new this week, {len(roster.inactive)} hace tiempo)...")
         time.sleep(0.3)
         slug = loc.replace(" ", "_").replace("/", "-").replace('"', "")
-        filename = OUTPUT_FILENAMES["simple"]
-        generate_roster_pdf(roster, spec.pdf_subtitle, str(out_dir / f"demo_{slug}_{filename}"),
+        filename = roster_filename
+        generate_roster_pdf(roster, spec.pdf_subtitle, str(out_dir / f"demo_{slug}_{filename}"), ctx,
                             show_route=spec.show_route, attendance_summary=spec.attendance_summary)
         _log(f"  ✓ {filename} saved")
         _log("  [DEMO MODE] Skipping Google Drive upload")
@@ -96,8 +93,8 @@ def main() -> None:
     if spec.volunteer_report:
         _log("Building volunteer arrival report...")
         generate_volunteer_pdf(mock_volunteers(), spec.label,
-                               str(out_dir / f"demo_{spec.id}_{VOLUNTEERS_FILENAME}"))
-        _log(f"  ✓ {VOLUNTEERS_FILENAME} saved")
+                               str(out_dir / f"demo_{spec.id}_{volunteers_filename}"), ctx)
+        _log(f"  ✓ {volunteers_filename} saved")
 
     elapsed = time.time() - t_start
     _log(f"\nDone in {elapsed:.1f}s")

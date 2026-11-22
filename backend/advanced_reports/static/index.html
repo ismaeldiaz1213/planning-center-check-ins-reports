@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="morning">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Advanced Reports · Mannabyte Labs</title>
+<meta name="description" content="Class and bus rosters for churches, made every week from Planning Center Check-Ins.">
+<link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/static/fonts/Outfit-Variable.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  // Set the theme before first paint: saved choice, else the device's preference.
+  (function () {
+    var theme = null;
+    try { theme = localStorage.getItem("ar_theme"); } catch (e) {}
+    if (theme !== "morning" && theme !== "evening") {
+      theme = window.matchMedia("(prefers-color-scheme: light)").matches ? "morning" : "evening";
+    }
+    document.documentElement.dataset.theme = theme;
+  })();
+</script>
+</head>
+<body>
+<div id="root"></div>
+<noscript><p style="padding:2rem">Advanced Reports needs JavaScript turned on.</p></noscript>
+<script src="/static/i18n.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -3,9 +3,9 @@
 # All Google Drive interaction lives here: authenticating with the service
 # account, finding/creating subfolders, and uploading (or replacing) PDF files.
 #
-# Authentication uses a credentials.json service-account key. The file must be
-# present at the path resolved by _CREDS_PATH at runtime — it is never baked into
-# the Docker image. Supply it via a mounted secret (Cloud Run) or a bind-mount
+# Authentication uses a credentials.json service-account key. The caller says
+# where that file is (legacy.py resolves it for the single-church install) — it
+# is never baked into the Docker image. Supply it via a mounted secret (Cloud Run) or a bind-mount
 # (local Docker). The service account must have Editor access to the target Drive folder.
 #
 # On Cloud Run the key is mounted from Secret Manager at GOOGLE_APPLICATION_CREDENTIALS
@@ -20,29 +20,25 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# Path to the service-account key file. GOOGLE_APPLICATION_CREDENTIALS overrides this
-# (used on Cloud Run, where the secret is mounted outside /app). Otherwise falls back to
-# the project root so it works for local (non-Docker) runs and the local bind-mount.
-_CREDS_PATH = os.environ.get(
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "credentials.json",
-    ),
-)
 _DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 
-def get_drive_service():
+def get_drive_service(credentials_path: str):
     """Build and return an authenticated Google Drive API client.
 
-    Uses the service account key at credentials.json. Raises FileNotFoundError
-    if the key is missing from the expected location.
+    Uses the service-account key file at `credentials_path`. Raises
+    FileNotFoundError if the key is missing.
     """
     credentials = service_account.Credentials.from_service_account_file(
-        _CREDS_PATH, scopes=_DRIVE_SCOPES
+        credentials_path, scopes=_DRIVE_SCOPES
     )
     return build("drive", "v3", credentials=credentials)
+
+
+def get_oauth_drive_service(credentials):
+    """Build a Drive API client from a user's OAuth credentials (the platform's
+    per-church Google connection, scope drive.file)."""
+    return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
 def _escape(value: str) -> str:

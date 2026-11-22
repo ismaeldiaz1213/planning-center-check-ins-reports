@@ -1,0 +1,160 @@
+{
+  "all_reports_succeeded": true,
+  "dry_run_succeeded": true,
+  "pco_requests_per_run": {
+    "total": 76,
+    "check-ins/check_ins": 59,
+    "check-ins/event_periods": 5,
+    "check-ins/events": 8,
+    "people/people?include=households": 2,
+    "people/people?include=phone_numbers,addresses": 2
+  },
+  "delivered": [
+    {
+      "drive_folder": "PARENT / Chofer, Capitanes, Ayudantes",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 1,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Chofer, Capitanes, Ayudantes",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Ruta 1 - Bus",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 1,
+      "snapshot": "files/PARENT/Ruta 1 - Bus/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Ruta 1 - Bus",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Ruta 2 - Van",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 2,
+      "snapshot": "files/PARENT/Ruta 2 - Van/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Ruta 2 - Van",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Ruta 3 - Carro",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 2,
+      "snapshot": "files/PARENT/Ruta 3 - Carro/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Ruta 3 - Carro",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Voluntarios / Rutas",
+      "filename": "Voluntarios.pdf",
+      "upload": "always replace",
+      "pages": 1,
+      "snapshot": "files/PARENT/Voluntarios/Rutas/Voluntarios.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / 3rd Grade Girls",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 2,
+      "snapshot": "files/PARENT/3rd Grade Girls/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / 3rd Grade Girls",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Clase de Parejas",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 1,
+      "snapshot": "files/PARENT/Clase de Parejas/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Clase de Parejas",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Kinder Niños",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 2,
+      "snapshot": "files/PARENT/Kinder Niños/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Kinder Niños",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Nursery",
+      "filename": "Roster.pdf",
+      "upload": "always replace",
+      "pages": 1,
+      "snapshot": "files/PARENT/Nursery/Roster.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Nursery",
+      "filename": "Instrucciones.pdf",
+      "upload": "only if fingerprint changes (8b16f1bee2415c16280a6adf92662e80)",
+      "pages": 14,
+      "snapshot": "files/PARENT/Chofer, Capitanes, Ayudantes/Instrucciones.pdf.txt"
+    },
+    {
+      "drive_folder": "PARENT / Voluntarios / Escuela Dominical",
+      "filename": "Voluntarios.pdf",
+      "upload": "always replace",
+      "pages": 1,
+      "snapshot": "files/PARENT/Voluntarios/Escuela Dominical/Voluntarios.pdf.txt"
+    }
+  ],
+  "dry_run_files": [
+    "3rd_Grade_Girls/Instrucciones.pdf",
+    "3rd_Grade_Girls/Roster.pdf",
+    "Chofer,_Capitanes,_Ayudantes/Instrucciones.pdf",
+    "Chofer,_Capitanes,_Ayudantes/Roster.pdf",
+    "Clase_de_Parejas/Instrucciones.pdf",
+    "Clase_de_Parejas/Roster.pdf",
+    "Kinder_Niños/Instrucciones.pdf",
+    "Kinder_Niños/Roster.pdf",
+    "Nursery/Instrucciones.pdf",
+    "Nursery/Roster.pdf",
+    "Ruta_1_-_Bus/Instrucciones.pdf",
+    "Ruta_1_-_Bus/Roster.pdf",
+    "Ruta_2_-_Van/Instrucciones.pdf",
+    "Ruta_2_-_Van/Roster.pdf",
+    "Ruta_3_-_Carro/Instrucciones.pdf",
+    "Ruta_3_-_Carro/Roster.pdf",
+    "Voluntarios/Escuela_Dominical/Voluntarios.pdf",
+    "Voluntarios/Rutas/Voluntarios.pdf"
+  ]
+}

@@ -1,7 +1,7 @@
 # planning_center_reports/cli.py
 #
 # Command-line entrypoint. Resolves the requested report from reports.yaml,
-# applies the requested theme to config._theme, then runs the shared pipeline.
+# builds the run from .env and reports.yaml (legacy.py), then runs the shared pipeline.
 #
 # main() is called from the project-root main.py so that the Docker container's
 # ENTRYPOINT ("python main.py") continues to work without any changes to the
@@ -14,8 +14,8 @@ import argparse
 import json
 import sys
 
-import planning_center_reports.config as config
-from planning_center_reports.reports import (
+from planning_center_reports import legacy
+from planning_center_reports.legacy import (
     ReportConfigError,
     config_path,
     enabled_reports,
@@ -32,7 +32,7 @@ def _print_reports(fmt: str) -> None:
             print(spec.id)
         return
     if fmt == "json":
-        print(json.dumps([spec.public_dict() for spec in specs], ensure_ascii=False, indent=2))
+        print(json.dumps([legacy.public_dict(spec) for spec in specs], ensure_ascii=False, indent=2))
         return
 
     source = config_path()
@@ -42,7 +42,7 @@ def _print_reports(fmt: str) -> None:
                    else f"rolling {spec.history_weeks} weeks")
         features = [
             f"history={history}",
-            f"active={spec.resolved_weeks()} weeks",
+            f"active={legacy.resolved_weeks(spec)} weeks",
         ]
         if spec.route_source_event:
             features.append(f"routes←{spec.route_source_event}")
@@ -56,23 +56,17 @@ def _print_reports(fmt: str) -> None:
             features.append("attendance-summary")
         if spec.drive_folder_prefix:
             features.append(f"drive:{spec.drive_folder_prefix}/")
-        if spec.resolved_theme():
-            features.append(f"theme={spec.resolved_theme()}")
+        if legacy.resolved_theme(spec):
+            features.append(f"theme={legacy.resolved_theme(spec)}")
         print(f"\n  {spec.icon} {spec.id}")
         print(f"     label      {spec.label}")
         print(f"     pco_event  {spec.pco_event!r}")
         print(f"     features   {'; '.join(features)}")
 
 
-def _apply_theme(theme: str | None) -> None:
-    """Apply a theme globally before any PDF generation begins.
-
-    All PDF functions read config._theme via config.T(), so setting it here is
-    sufficient — no need to pass it through the call stack.
-    """
-    config._theme = config.THEMES[theme]
+def _announce_theme(theme: str | None) -> None:
     if theme:
-        print(f"Theme: {config._theme['campaign']}", flush=True)
+        print(f"Theme: {legacy.church().texts.t(f'campaign.{theme}')}", flush=True)
 
 
 def main():
@@ -146,7 +140,9 @@ def main():
             if args.dry_run:
                 print(f"[dry-run] No files will be uploaded. PDFs will be saved to {args.output_dir}",
                       flush=True)
-            ok = run_all(dry_run=args.dry_run, output_dir=args.output_dir, theme=args.theme)
+            with legacy.run_context(dry_run=args.dry_run, output_dir=args.output_dir) as ctx:
+                ok = run_all(ctx, theme=args.theme)
+                print(f"\n{ctx.pco.stats.summary()}", flush=True)
             print("\nDone." if ok else "\nDone with errors.", flush=True)
             sys.exit(0 if ok else 1)
 
@@ -163,21 +159,16 @@ def main():
         sys.exit(1)
 
     # Precedence for weeks/theme: CLI flag → env override → reports.yaml default.
-    weeks = args.weeks if args.weeks is not None else spec.resolved_weeks()
-    theme = args.theme if args.theme is not None else spec.resolved_theme()
+    weeks = args.weeks if args.weeks is not None else legacy.resolved_weeks(spec)
+    theme = args.theme if args.theme is not None else legacy.resolved_theme(spec)
 
-    _apply_theme(theme)
+    _announce_theme(theme)
 
     if args.dry_run:
         print(f"[dry-run] No files will be uploaded. PDFs will be saved to {args.output_dir}",
               flush=True)
 
-    run_report(
-        spec,
-        weeks=weeks,
-        dry_run=args.dry_run,
-        output_dir=args.output_dir,
-        location_filter=args.location,
-    )
-
+    with legacy.run_context(dry_run=args.dry_run, output_dir=args.output_dir) as ctx:
+        run_report(ctx, spec, weeks=weeks, location_filter=args.location, theme=theme)
+        print(f"\n{ctx.pco.stats.summary()}", flush=True)
     print("\nDone.", flush=True)

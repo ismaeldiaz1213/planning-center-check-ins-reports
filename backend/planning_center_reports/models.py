@@ -14,7 +14,7 @@ import re
 from datetime import date, datetime
 from typing import TypedDict
 
-from planning_center_reports.config import MESES_ES
+from planning_center_reports.i18n import Catalog
 
 
 class Attendee(TypedDict, total=False):
@@ -35,18 +35,6 @@ class Attendee(TypedDict, total=False):
 
 
 # ── Date / display helpers ────────────────────────────────────────────────────
-
-def _fecha_es(dt: datetime | None = None) -> str:
-    """Return a Spanish-language date string for the PDF header.
-
-    Example: "Generado el 15 de marzo de 2026 a las 10:32"
-    """
-    dt = dt or datetime.now()
-    return (
-        f"Generado el {dt.day} de {MESES_ES[dt.month]} de {dt.year} "
-        f"a las {dt.strftime('%H:%M')}"
-    )
-
 
 def _fmt_birthday(raw: str) -> str:
     """Convert PCO's ISO date "YYYY-MM-DD" to display format "MM/DD/YYYY".
@@ -85,7 +73,7 @@ def _is_minor(birthday_raw: str) -> bool:
     return age is not None and age < 18
 
 
-def _resolve_grade(pco_grade: str, birthday_raw: str) -> str:
+def _resolve_grade(grade: str, birthday_raw: str, texts: Catalog) -> str:
     """Return a display-ready grade string.
 
     PCO often leaves grade blank for toddlers. For ages 0-4 we infer the
@@ -94,12 +82,12 @@ def _resolve_grade(pco_grade: str, birthday_raw: str) -> str:
     age = _age_from_birthday(birthday_raw)
     if age is not None:
         if age <= 2:
-            return "Nursery"
+            return texts.t("grade.toddler")
         if age == 3:
-            return "3 años"
+            return texts.t("grade.age3")
         if age == 4:
-            return "4 años"
-    return pco_grade or ""
+            return texts.t("grade.age4")
+    return grade or ""
 
 
 # ── Address helpers ───────────────────────────────────────────────────────────

@@ -1,30 +1,14 @@
 # planning_center_reports/config.py
 #
-# Central configuration: environment variables, layout constants, colour palettes,
-# and the active-theme system. Every other module that needs a constant or colour
-# should import it from here rather than defining its own copy.
-#
-# The _theme global and T() helper are defined here so that cli.py can switch the
-# theme once (config._theme = config.THEMES["primavera"]) and every PDF function
-# picks up the change automatically — because T() reads _theme from this module's
-# namespace at call time, not at import time.
+# Constants shared by the whole engine: page layout, fixed colours, the theme
+# palettes and where bundled assets live. Nothing here belongs to a particular
+# church — a church's settings arrive as a ChurchConfig (church.py), and the
+# only module that reads the environment is the single-church adapter, legacy.py.
 
 import os
-from pathlib import Path
 
-from dotenv import load_dotenv
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
-
-# Search for .env starting from the package → backend/ → project root.
-# This handles: local dev (root .env), Docker (env vars injected, no .env needed).
-load_dotenv(Path(__file__).parent.parent.parent / ".env")  # project root
-load_dotenv(Path(__file__).parent.parent / ".env")         # backend/ (overrides if present)
-
-# ── Credentials (loaded from .env locally; injected as secrets on Cloud Run) ──
-PCO_APP_ID                    = os.getenv("PCO_APP_ID")
-PCO_SECRET                    = os.getenv("PCO_SECRET")
-GOOGLE_DRIVE_PARENT_FOLDER_ID = os.getenv("GOOGLE_DRIVE_PARENT_FOLDER_ID")
 
 BASE_URL = "https://api.planningcenteronline.com"
 
@@ -32,26 +16,8 @@ BASE_URL = "https://api.planningcenteronline.com"
 # Resolved relative to this file so paths work both locally and inside Docker.
 _HERE      = os.path.abspath(os.path.dirname(__file__))
 _ROOT      = os.path.dirname(_HERE)            # project root (one level up)
-LOGO_PATH  = os.path.join(_ROOT, "logo.png")
+LOGO_PATH  = os.path.join(_ROOT, "logo.png")     # the bundled logo (legacy single-church install)
 ASSETS_DIR = os.path.join(_ROOT, "assets")    # theme image assets
-
-# ── Church locale ─────────────────────────────────────────────────────────────
-# Check-in timestamps arrive in UTC; arrival times and Sunday dates are shown in
-# the church's local time.
-CHURCH_TIMEZONE = os.getenv("CHURCH_TIMEZONE", "America/Chicago")
-
-# Video walkthrough linked (and QR-coded) on the Instrucciones.pdf cover page.
-CHECKIN_VIDEO_URL = os.getenv(
-    "CHECKIN_VIDEO_URL",
-    "https://drive.google.com/file/d/1yTSZM-FTPZHbKlRrMizAm06eUM-E6Mc4/view",
-)
-# Feedback form linked from every PDF — questions, confusion, ideas, venting.
-FEEDBACK_FORM_URL = os.getenv(
-    "FEEDBACK_FORM_URL",
-    "https://docs.google.com/forms/d/e/1FAIpQLSfSflUQmzCsL1TekFt_lQVCddGIInJw0QRoBjE8f6VrX0Hz6g/viewform",
-)
-# Who volunteers should find when the app can't sort something out.
-CHECKIN_HELP_CONTACT = os.getenv("CHECKIN_HELP_CONTACT", "Hna. Lira — cuarto de impresoras")
 
 # ── Page layout (landscape Letter = 792 × 612 pts) ───────────────────────────
 PAGE_W, PAGE_H = landscape(letter)
@@ -79,28 +45,10 @@ ACCENT_SOFT  = colors.HexColor("#3F9A45")  # a little early
 ACCENT_WARN  = colors.HexColor("#E08A00")  # slightly late / follow up
 ACCENT_LATE  = colors.HexColor("#C62828")  # late
 
-# ── Footer text ───────────────────────────────────────────────────────────────
-VERSE_TEXT     = os.getenv(
-    "CHURCH_VERSE_TEXT",
-    '"Id por todo el mundo y predicad el evangelio a toda criatura"',
-)
-VERSE_REF      = os.getenv("CHURCH_VERSE_REF", "Marcos 16:15 — RV1960")
-RUTAS_SUBTITLE = os.getenv("RUTAS_SUBTITLE", "Ministerio de Autobuses")
-
-# ── Spanish month names (used when printing the generation date) ──────────────
-MESES_ES = {
-    1: "enero",     2: "febrero",   3: "marzo",     4: "abril",
-    5: "mayo",      6: "junio",     7: "julio",      8: "agosto",
-    9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre",
-}
-
-MESES_ABREV = {
-    1: "Ene", 2: "Feb", 3: "Mar", 4: "Abr", 5: "May", 6: "Jun",
-    7: "Jul", 8: "Ago", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dic",
-}
-
 # ── Colour palettes ───────────────────────────────────────────────────────────
-# Each theme is a dict with the keys used by T() throughout the PDF code.
+# Each theme is a dict with the keys the PDF code reads through RenderContext.T().
+# The campaign label printed in the header comes from the church's text catalog
+# (i18n "campaign.<theme>"), not from here.
 #
 # visitor_icon  — filename within ASSETS_DIR to use instead of the gold dot.
 #                 Set to None to keep the default gold dot.
@@ -116,7 +64,6 @@ THEMES = {
         "addr_bar":      colors.HexColor("#2255aa"),
         "rule":          colors.HexColor("#4A90D9"),
         "footer_text":   colors.HexColor("#0D1F5C"),
-        "campaign":      None,
         "emoji":         "",
         "visitor_icon":  None,
         "campaign_icon": None,
@@ -129,7 +76,6 @@ THEMES = {
         "addr_bar":      colors.HexColor("#2E7D32"),
         "rule":          colors.HexColor("#81C784"),
         "footer_text":   colors.HexColor("#1B5E20"),
-        "campaign":      "Campaña de Primavera",
         "emoji":         "⚽",
         "visitor_icon":  "SoccerBall.png",   # replaces gold dot for visitors
         "campaign_icon": "gold_medal.png",   # shown beside campaign label
@@ -142,7 +88,6 @@ THEMES = {
         "addr_bar":      colors.HexColor("#D84315"),
         "rule":          colors.HexColor("#FFAB91"),
         "footer_text":   colors.HexColor("#BF360C"),
-        "campaign":      "Campaña de Verano",
         "emoji":         "☀️",
         "visitor_icon":  None,
         "campaign_icon": None,
@@ -155,7 +100,6 @@ THEMES = {
         "addr_bar":      colors.HexColor("#5D4037"),
         "rule":          colors.HexColor("#BCAAA4"),
         "footer_text":   colors.HexColor("#4E342E"),
-        "campaign":      "Campaña de Otoño",
         "emoji":         "🍂",
         "visitor_icon":  None,
         "campaign_icon": None,
@@ -168,19 +112,8 @@ THEMES = {
         "addr_bar":      colors.HexColor("#283593"),
         "rule":          colors.HexColor("#9FA8DA"),
         "footer_text":   colors.HexColor("#1A237E"),
-        "campaign":      "Campaña de Invierno",
         "emoji":         "❄️",
         "visitor_icon":  None,
         "campaign_icon": None,
     },
 }
-
-# ── Active theme ──────────────────────────────────────────────────────────────
-# Set once in cli.py before any PDF functions are called.
-# All modules import T() from here; reassigning _theme here updates them all.
-_theme = THEMES[None]
-
-
-def T(key):
-    """Return the value for `key` from the currently active theme."""
-    return _theme[key]

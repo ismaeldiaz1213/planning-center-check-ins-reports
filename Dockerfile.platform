@@ -1,0 +1,28 @@
+# Advanced Reports platform image: the web service and the per-church runner.
+#   web service (Cloud Run service): the default command below
+#   runner (Cloud Run job):          python -m advanced_reports.runner <org_id> <run_id>
+# IBL's existing weekly job keeps its own image (Dockerfile); this one doesn't touch it.
+#
+# Nothing secret is baked in: keys arrive as environment variables from Secret
+# Manager at deploy time (deploy/platform.sh).
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    AR_DATA_DIR=/tmp/advanced-reports
+
+WORKDIR /app
+
+COPY backend/requirements.txt backend/requirements-web.txt ./
+RUN pip install -r requirements.txt -r requirements-web.txt
+
+COPY backend/planning_center_reports/ planning_center_reports/
+COPY backend/assets/ assets/
+COPY backend/advanced_reports/ advanced_reports/
+
+RUN useradd --uid 10001 --no-create-home app
+USER app
+
+# Cloud Run sets PORT. --proxy-headers so redirects use https behind Google's front end.
+CMD ["sh", "-c", "exec uvicorn advanced_reports.app:create_app --factory --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers --forwarded-allow-ips='*'"]

@@ -23,21 +23,32 @@ PDF previews, developing the web UI locally, and deploying to Google Cloud.
 planning-center-check-ins-reports/
 │
 ├── backend/                        ← All Python source
-│   ├── planning_center_reports/    ←   Main package
-│   │   ├── config.py               ←     Constants, themes, env vars
+│   ├── planning_center_reports/    ←   The report engine (knows nothing about .env)
+│   │   ├── church.py               ←     ChurchConfig + Branding: one church's settings
+│   │   ├── reports.py              ←     Report schema (ReportSpec) + reports.yaml parser
+│   │   ├── i18n/                   ←     Every word printed on a PDF (es.py, en.py)
+│   │   ├── config.py               ←     Page layout and theme colour constants
 │   │   ├── models.py               ←     Data types + pure helpers
-│   │   ├── pco_client.py           ←     Planning Center API calls
-│   │   ├── drive_client.py         ←     Google Drive upload
-│   │   ├── services.py             ←     Fetch → transform → generate → upload
-│   │   ├── reports.py              ←     reports.yaml schema + loader
+│   │   ├── roster_data.py          ←     Check-ins → rosters and volunteer sheets
+│   │   ├── pco_client.py           ←     PcoClient: Planning Center API, pacing, stats
+│   │   ├── drive_client.py         ←     Google Drive calls
+│   │   ├── delivery.py             ←     Where PDFs go: local folder, or Drive
+│   │   ├── services.py             ←     RunContext + run_report / run_all
+│   │   ├── legacy.py               ←     Single-church adapter: the ONLY reader of
+│   │   │                                 .env and reports.yaml (builds the above)
 │   │   ├── cli.py                  ←     argparse entrypoint
 │   │   └── pdf/
+│   │       ├── context.py          ←     RenderContext: words + branding + theme
 │   │       ├── layout.py           ←     ReportLab primitives
-│   │       └── rosters.py          ←     PDF generators
+│   │       ├── rosters.py          ←     Roster.pdf
+│   │       ├── volunteers.py       ←     Voluntarios.pdf
+│   │       └── instructions.py     ←     Instrucciones.pdf
+│   ├── bench/                      ←   Benchmarks (see docs/benchmarks.md)
 │   ├── main.py                     ←   Cloud Run entrypoint
 │   ├── preview.py                  ←   Local PDF preview (no credentials needed)
 │   ├── api.py                      ←   FastAPI web server (optional, local use)
 │   ├── tests/                      ←   pytest test suite
+│   │   └── golden/                 ←     Snapshots of IBL's exact output (see below)
 │   ├── requirements.txt            ←   Core deps (used by Docker)
 │   ├── requirements-web.txt        ←   FastAPI + uvicorn (API server only)
 │   └── requirements-dev.txt        ←   pytest + ruff (dev tools)
@@ -95,7 +106,45 @@ pip install -r requirements-web.txt
 pytest
 ```
 
-Expected output: `121 passed`.
+Every test should pass; the last line reads like `375 passed`.
+
+### Golden tests (IBL's exact output)
+
+`tests/golden/` holds snapshots of what the engine produces today: the text, links and a
+per-page drawing fingerprint of every PDF type, plus the filenames, Drive folder paths and
+Planning Center request counts of a whole run against a fake Planning Center. They run
+with the rest of the suite and fail on any difference.
+
+A failing golden test means a real church's rosters would change. If the change is
+intended, refresh the snapshots and review the diff like code:
+
+```bash
+pytest --update-golden          # or: UPDATE_GOLDEN=1 pytest
+git diff tests/golden/snapshots
+```
+
+The snapshots depend on the PDF libraries, so `requirements-dev.txt` pins `reportlab` and
+`pypdf` (`tests/golden/snapshots/VERSIONS.txt` records what the snapshots were made with).
+When only a `[drawing]` line differs, the text is the same but something drawn on that
+page changed: compare the PDFs by eye.
+
+### How the engine is put together
+
+The engine (`planning_center_reports/`) takes everything it needs as arguments, so one
+process can serve several churches:
+
+```python
+church   = ChurchConfig(org_id=..., name=..., timezone=..., language="es", reports=...)
+pco      = PcoClient(PersonalAccessToken(app_id, secret))     # or OAuthBearer(...)
+delivery = LocalDelivery("./out")                             # or a Drive delivery
+with RunContext(church, pco, delivery) as ctx:
+    run_all(ctx)                                              # or run_report(ctx, spec)
+```
+
+`legacy.py` builds those objects from `.env` and `reports.yaml` for the single-church
+install (`main.py`, `api.py`, `preview.py`, the maintenance scripts). It is the only
+module allowed to read the environment. PDF wording lives in `i18n/es.py` and
+`i18n/en.py`; nothing in `pdf/` contains user-facing text.
 
 ### Run one file or one test
 
@@ -119,6 +168,35 @@ until it prints nothing.
 ruff check . && pytest
 ```
 
+### Run the platform locally (Advanced Reports)
+
+`advanced_reports/` is the multi-church platform around the engine. To try it on your own
+machine, with no Planning Center OAuth app or Google Cloud project:
+
+```bash
+cd backend
+AR_DEV_LOGIN=1 uvicorn advanced_reports.app:create_app --factory --port 8000
+# then open http://localhost:8000
+```
+
+`AR_DEV_LOGIN=1` adds two sign-in buttons that skip Planning Center sign-in:
+
+- **Liberty Baptist Church**: sample data in English (`advanced_reports/demo.py`). Only the
+  church's name is real; no network, no real people.
+- **Iglesia Bautista Libertad**: shown only when `.env` has `PCO_APP_ID` / `PCO_SECRET`.
+  It imports `.env` + `reports.yaml` as a church and reads live Planning Center data.
+  Nothing is uploaded to Google Drive; the PDFs stay on this machine.
+
+Everything it stores goes under `out/platform-data/` (gitignored): settings and run history
+as JSON, the Planning Center token encrypted, and each run's PDFs. Delete that folder to
+start over. Never set `AR_DEV_LOGIN` on a deployed server.
+
+The pages are plain files in `advanced_reports/static/` (`index.html`, `app.css`, `app.js`,
+`i18n.js`); there is no build step, so edit and reload. The home page's sample pictures
+come from `python -m advanced_reports.make_samples` (needs `pdftoppm`).
+
+Tests: `pytest tests/platform`.
+
 ### Generate PDF previews (no credentials needed)
 
 ```bash
@@ -138,7 +216,7 @@ python preview.py --report escuela-b
 python preview.py --open
 ```
 
-Output goes to `backend/previews/`. Edit `MOCK_ATTENDEES` in `preview.py` to
+Output goes to `backend/previews/`. Edit `MOCK_ATTENDEES` in `planning_center_reports/mock_data.py` to
 test edge cases (missing fields, toddlers, visitors, helpers).
 
 ---

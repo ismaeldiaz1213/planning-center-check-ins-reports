@@ -164,7 +164,8 @@ Clase de Ancianos (55+)
 `frontend/` split — still present, not removed) solves a different problem: bulk
 check-in from a **static PCO Group's membership**, rather than from check-in history.
 Use it for things like checking in a helper roster; use `promote_checkins.py` for
-grade promotion.
+grade promotion. For a roster spreadsheet (any church), use `checkin_people_list.py`;
+all four tools are compared in [check-in-tools.md](check-in-tools.md).
 
 ---
 
