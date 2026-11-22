@@ -1,19 +1,22 @@
 # advanced_reports/core/tenant_repo.py
 #
 # TenantRepo(org_id): everything stored for ONE church. It is the only code that
-# touches the document store or the files folder, and every path it builds
-# starts with churches/{org_id} (plan §3.7 rule 2). Route handlers and the
+# touches the document store or the file store (core/blobs.py), and every path
+# it builds starts with churches/{org_id} (plan §3.7 rule 2). Files are
+# encrypted with the church's data key before they leave this class. Route handlers and the
 # runner get a TenantRepo for the signed-in church and can reach nothing else.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
-import shutil
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from advanced_reports.core import crypto
+from advanced_reports.core.blobs import BlobStore, LocalBlobs, check_key
 from advanced_reports.core.store import Store
 
 _ORG_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
@@ -35,14 +38,14 @@ def now_iso() -> str:
 
 
 class TenantRepo:
-    def __init__(self, store: Store, vault: crypto.Vault, files_root: str | Path, org_id: str):
+    def __init__(self, store: Store, vault: crypto.Vault, files: BlobStore | str | Path, org_id: str):
         if not _ORG_ID.match(str(org_id)):
             raise ValueError(f"not a church id: {org_id!r}")
         self.org_id = str(org_id)
         self._store = store
         self._vault = vault
         self._root = f"churches/{self.org_id}"
-        self._files = Path(files_root) / "churches" / self.org_id
+        self._blobs = LocalBlobs(files) if isinstance(files, (str, Path)) else files
 
     # ── The church ────────────────────────────────────────────────────────────
     def church(self) -> dict | None:
@@ -136,9 +139,6 @@ class TenantRepo:
     def cancel_requested(self, run_id: str) -> bool:
         return self._store.get(f"{self._root}/runs/{run_id}/signals/cancel") is not None
 
-    def discard_run_files(self, run_id: str) -> None:
-        if _RUN_ID.match(run_id):
-            shutil.rmtree(self._files / "runs" / run_id, ignore_errors=True)
 
     def start_run(self, trigger: str, started_by: str = "") -> dict | None:
         """Create a run unless one is already queued or running. None means "busy".
@@ -156,6 +156,12 @@ class TenantRepo:
             return None
         return self.create_run(trigger, started_by)
 
+    def fail_to_start(self, run: dict, reason: str) -> None:
+        """The run was recorded but could not be started: close it so it does not block."""
+        run.update(status="failed", finished_at=now_iso(), error=reason)
+        run["log"] = [*run.get("log", []), f"✗ {reason}"]
+        self.save_run(run)
+
     def active_run(self) -> dict | None:
         """The church's queued or running run, if any (one at a time)."""
         cutoff = (datetime.now(UTC) - STALE_RUN).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -164,35 +170,75 @@ class TenantRepo:
                 return run
         return None
 
-    # ── Files a run produced ──────────────────────────────────────────────────
-    def run_dir(self, run_id: str) -> Path:
+    # ── Files a run produced (encrypted in the file store) ────────────────────
+    def _run_key(self, run_id: str, relative: str) -> str:
         if not _RUN_ID.match(run_id):
             raise ValueError(f"not a run id: {run_id!r}")
-        folder = self._files / "runs" / run_id
-        folder.mkdir(parents=True, exist_ok=True)
-        return folder
+        key = f"{self._root}/runs/{run_id}/{relative}"
+        check_key(key)
+        return key
 
-    def run_file(self, run_id: str, relative: str) -> Path | None:
-        """A file inside this church's run folder, or None. Never outside it."""
-        if not _RUN_ID.match(run_id):
+    def save_run_file(self, run_id: str, relative: str, data: bytes) -> None:
+        key = self._run_key(run_id, relative)
+        self._blobs.put(key, crypto.seal_bytes(self._key(), data, key))
+
+    def run_file(self, run_id: str, relative: str) -> bytes | None:
+        """A file of this church's run, decrypted, or None. Never another church's."""
+        try:
+            key = self._run_key(run_id, relative)
+        except ValueError:
             return None
-        base = (self._files / "runs" / run_id).resolve()
-        target = (base / relative).resolve()
-        if base not in target.parents or not target.is_file():
+        blob = self._blobs.get(key)
+        if blob is None:
             return None
-        return target
+        try:
+            return crypto.unseal_bytes(self._key(), blob, key)
+        except crypto.DecryptError:  # damaged, moved, or left from before files were encrypted
+            return None
+
+    def discard_run_files(self, run_id: str) -> None:
+        if _RUN_ID.match(run_id):
+            self._blobs.delete_prefix(f"{self._root}/runs/{run_id}")
+
+    def keep_only_files_of(self, run_id: str) -> None:
+        """Decision D2: once a run succeeds, delete every older run's PDFs."""
+        for run in self.runs(limit=1000):
+            if run["id"] != run_id and run.get("outputs") and not run.get("files_deleted"):
+                self.discard_run_files(run["id"])
+                run["files_deleted"] = True
+                self.save_run(run)
 
     # ── Logo ──────────────────────────────────────────────────────────────────
-    def logo_path(self) -> str | None:
-        path = self._files / "logo.png"
-        return str(path) if path.is_file() else None
+    def has_logo(self) -> bool:
+        return self._blobs.exists(f"{self._root}/logo.png")
 
     def save_logo(self, png: bytes) -> None:
-        self._files.mkdir(parents=True, exist_ok=True)
-        (self._files / "logo.png").write_bytes(png)
+        key = f"{self._root}/logo.png"
+        self._blobs.put(key, crypto.seal_bytes(self._key(), png, key))
+
+    def logo_path(self) -> str | None:
+        """The logo as a local file, for the PDF renderer. Written to a private
+        temporary file named after its content, so it is written once per version."""
+        key = f"{self._root}/logo.png"
+        blob = self._blobs.get(key)
+        if blob is None:
+            return None
+        try:
+            png = crypto.unseal_bytes(self._key(), blob, key)
+        except crypto.DecryptError:
+            return None
+        folder = Path(tempfile.gettempdir()) / "advanced-reports-logos"
+        folder.mkdir(mode=0o700, exist_ok=True)
+        path = folder / f"{self.org_id}-{hashlib.sha256(png).hexdigest()[:16]}.png"
+        if not path.is_file():
+            fd, tmp = tempfile.mkstemp(dir=folder, suffix=".tmp")
+            with open(fd, "wb") as fh:
+                fh.write(png)
+            Path(tmp).replace(path)
+        return str(path)
 
     # ── Disconnect ────────────────────────────────────────────────────────────
     def delete_everything(self) -> None:
         """Remove the church, every document under it, and its files (plan §3.5)."""
+        self._blobs.delete_prefix(self._root)
         self._store.delete_tree(self._root)
-        shutil.rmtree(self._files, ignore_errors=True)

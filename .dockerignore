@@ -1,0 +1,12 @@
+# Keep secrets and bulky folders out of every Docker build context.
+**/.env
+**/.env.*
+!**/.env.example
+**/credentials.json
+**/client_secret*.json
+.git
+out
+**/out
+frontend/node_modules
+**/__pycache__
+**/.venv

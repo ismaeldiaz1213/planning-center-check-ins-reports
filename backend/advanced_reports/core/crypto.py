@@ -48,6 +48,19 @@ def unseal(key: bytes, token: str, bound_to: str) -> dict:
     return json.loads(_decrypt(key, token, bound_to))
 
 
+def seal_bytes(key: bytes, data: bytes, bound_to: str) -> bytes:
+    """Encrypt a file's bytes under a church's data key (raw nonce + ciphertext)."""
+    nonce = os.urandom(_NONCE)
+    return nonce + AESGCM(key).encrypt(nonce, data, bound_to.encode())
+
+
+def unseal_bytes(key: bytes, blob: bytes, bound_to: str) -> bytes:
+    try:
+        return AESGCM(key).decrypt(blob[:_NONCE], blob[_NONCE:], bound_to.encode())
+    except (InvalidTag, ValueError) as exc:
+        raise DecryptError(f"could not decrypt file bound to {bound_to!r}") from exc
+
+
 class Vault:
     """Holds the master key; makes and unwraps per-church data keys."""
 

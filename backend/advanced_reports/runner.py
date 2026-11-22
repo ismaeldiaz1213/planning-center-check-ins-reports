@@ -20,12 +20,12 @@
 from __future__ import annotations
 
 import contextlib
-import shutil
 import sys
 import time
 from pathlib import Path
 
 from advanced_reports.core import connections
+from advanced_reports.core.blobs import BlobStore, open_blobs
 from advanced_reports.core.store import Store, open_store
 from advanced_reports.core.tenant_repo import TenantRepo, now_iso
 from advanced_reports.modules import checkin_reports
@@ -127,11 +127,12 @@ class _WatchedPco:
 
 
 class RunFolderDelivery:
-    """Save each PDF into the church's run folder, mirroring the folder nesting,
-    and remember which report and class each file belongs to."""
+    """Save each PDF into the church's run files (encrypted, in the file store),
+    mirroring the folder nesting, and remember which report and class each file
+    belongs to."""
 
-    def __init__(self, folder: Path, recorder: _Recorder, texts):
-        self.folder, self._rec = folder, recorder
+    def __init__(self, repo: TenantRepo, run_id: str, recorder: _Recorder, texts):
+        self.repo, self.run_id, self._rec = repo, run_id, recorder
         self._kinds = {texts.t("file.roster"): "roster", texts.t("file.volunteers"): "volunteers",
                        texts.t("file.instructions"): "instructions"}
         self.outputs: list[dict] = []
@@ -140,11 +141,10 @@ class RunFolderDelivery:
         kind = self._kinds.get(filename, "other")
         if kind != "instructions":
             self._rec.step("saving", kind=kind, location=folders[-1] if kind == "roster" else "")
-        dest = self.folder.joinpath(*[slug(f) for f in folders])
-        dest.mkdir(parents=True, exist_ok=True)
-        shutil.copy(path, dest / filename)
-        relative = (dest / filename).relative_to(self.folder)
-        self.outputs.append({"path": str(relative), "bytes": (dest / filename).stat().st_size,
+        relative = "/".join([*(slug(f) for f in folders), filename])
+        data = Path(path).read_bytes()
+        self.repo.save_run_file(self.run_id, relative, data)
+        self.outputs.append({"path": relative, "bytes": len(data),
                              "kind": kind, "report": self._rec.report["id"],
                              "location": folders[-1] if kind != "volunteers" else ""})
         print(f"  ✓ Saved {'/'.join(folders)}/{filename}", flush=True)
@@ -158,9 +158,9 @@ def _last_finished(repo: TenantRepo) -> tuple[int | None, float | None]:
     return None, None
 
 
-def execute(settings: Settings, store: Store, org_id: str, run_id: str) -> bool:
+def execute(settings: Settings, store: Store, org_id: str, run_id: str, blobs: BlobStore | None = None) -> bool:
     """Run every enabled report for one church. Returns True if all succeeded."""
-    repo = TenantRepo(store, settings.vault, settings.files_dir, org_id)
+    repo = TenantRepo(store, settings.vault, blobs if blobs is not None else open_blobs(settings), org_id)
     run = repo.run(run_id)
     if run is None:
         raise LookupError(f"run {run_id} not found for church {org_id}")
@@ -176,7 +176,7 @@ def execute(settings: Settings, store: Store, org_id: str, run_id: str) -> bool:
         if not reports:
             raise RuntimeError("no reports are set up for this church yet")
         pco = connections.pco_client(repo, settings)
-        delivery = RunFolderDelivery(repo.run_dir(run_id), recorder, church.texts)
+        delivery = RunFolderDelivery(repo, run_id, recorder, church.texts)
         failed: list[str] = []
         with contextlib.redirect_stdout(recorder), \
                 RunContext(church, _WatchedPco(pco, recorder), delivery) as ctx:
@@ -211,6 +211,8 @@ def execute(settings: Settings, store: Store, org_id: str, run_id: str) -> bool:
     run["usage"] = {"pco": pco.stats.as_dict() if pco is not None else {}, "steps": recorder.steps,
                     "files": len(outputs), "bytes": sum(o["bytes"] for o in outputs)}
     recorder.save()
+    if ok:
+        repo.keep_only_files_of(run_id)
     return ok
 
 

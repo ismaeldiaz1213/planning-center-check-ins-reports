@@ -14,6 +14,10 @@
 #   AR_FIRESTORE_PROJECT   keep documents in this Google Cloud project's Firestore
 #                          (unset: one JSON file per document under AR_DATA_DIR)
 #   AR_FIRESTORE_DATABASE  Firestore database id (default "(default)")
+#   AR_BUCKET              keep run PDFs and logos in this Cloud Storage bucket
+#                          (unset: files under AR_DATA_DIR)
+#   AR_RUNNER_JOB          start runs as executions of this Cloud Run job,
+#                          projects/<p>/locations/<r>/jobs/<name> (unset: a subprocess)
 #
 # With AR_DEV_LOGIN=1 a missing master key or session secret is generated and
 # kept in AR_DATA_DIR, so a local demo needs no setup. Without it both are
@@ -44,6 +48,8 @@ class Settings:
     demo_step_s: float = 0.0      # pause per Planning Center call for the sample church, so progress is visible
     firestore_project: str = ""   # empty: FileStore under data_dir
     firestore_database: str = "(default)"
+    bucket: str = ""              # empty: LocalBlobs under data_dir/files
+    runner_job: str = ""          # empty: SubprocessLauncher
 
     @property
     def vault(self) -> Vault:
@@ -92,4 +98,6 @@ def from_env(env: dict | None = None) -> Settings:
         demo_step_s=float(env.get("AR_DEMO_STEP_SECONDS") or (0.2 if dev else 0)),
         firestore_project=env.get("AR_FIRESTORE_PROJECT", "").strip(),
         firestore_database=env.get("AR_FIRESTORE_DATABASE", "").strip() or "(default)",
+        bucket=env.get("AR_BUCKET", "").strip(),
+        runner_job=env.get("AR_RUNNER_JOB", "").strip(),
     )

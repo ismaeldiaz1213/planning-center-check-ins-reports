@@ -32,6 +32,9 @@ into **Advanced Reports for Planning Center**, a multi-church hosted platform.
   Needs `gcloud auth application-default login` as ismael@mannabyte.com.
 - Google Cloud: `mannabyte-reports-staging` and `mannabyte-reports-prod` (Mannabyte account).
   IBL's old weekly job lives in `ibl-planning-center-check-ins` (IBL account); leave it alone.
+- Deploy: `bash deploy/platform.sh staging` (or `prod`; `DRY_RUN=1` to preview). The owner
+  runs it (creating cloud resources needs their approval). Staging:
+  https://advanced-reports-300061322405.us-central1.run.app
 - Local platform: `cd backend && AR_DEV_LOGIN=1 .venv/bin/uvicorn advanced_reports.app:create_app --factory --port 8000`.
 - The Planning Center MCP connector is read-only and connected to one church at a time.
   Check which one with `people_current_organization`.

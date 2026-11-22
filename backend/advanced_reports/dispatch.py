@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from advanced_reports.core.blobs import open_blobs
 from advanced_reports.core.store import Store
 from advanced_reports.core.tenant_repo import TenantRepo, all_org_ids
 from advanced_reports.modules import checkin_reports
@@ -41,11 +42,12 @@ def is_due(church: dict, now_utc: datetime) -> str | None:
     return today
 
 
-def dispatch(settings: Settings, store: Store, launcher, now_utc: datetime) -> list[str]:
+def dispatch(settings: Settings, store: Store, launcher, now_utc: datetime, blobs=None) -> list[str]:
     """Start every due run. Returns the ids of the churches that were started."""
+    blobs = blobs if blobs is not None else open_blobs(settings)
     started: list[str] = []
     for org_id in all_org_ids(store):
-        repo = TenantRepo(store, settings.vault, settings.files_dir, org_id)
+        repo = TenantRepo(store, settings.vault, blobs, org_id)
         church = repo.church()
         if not church or church.get("status") != "active":
             continue
@@ -57,7 +59,11 @@ def dispatch(settings: Settings, store: Store, launcher, now_utc: datetime) -> l
         run = repo.start_run("schedule", started_by="")
         if run is None:
             continue
+        try:
+            launcher.launch(org_id, run["id"])
+        except Exception:  # tried again at the next tick, within the grace window
+            repo.fail_to_start(run, "The scheduled run could not be started.")
+            continue
         repo.update_church({"schedule_last": today})
-        launcher.launch(org_id, run["id"])
         started.append(org_id)
     return started

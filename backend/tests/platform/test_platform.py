@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from advanced_reports import demo, runner
 from advanced_reports.app import create_app
 from advanced_reports.core import connections, crypto, pco_oauth, session
+from advanced_reports.core.blobs import GcsBlobs, LocalBlobs
 from advanced_reports.core.store import FileStore, MemoryStore
 from advanced_reports.core.tenant_repo import TenantRepo
 from advanced_reports.modules import checkin_reports
@@ -172,6 +173,48 @@ class TestStores:
             any_store.set(path, {})
 
 
+# File stores: the same checks for a folder and, when pointed at a real bucket,
+#   AR_TEST_BUCKET=<bucket> pytest tests/platform -k Blobs
+# Cloud Storage (under a throwaway "ci-tests/<random>" prefix, deleted afterwards).
+TEST_BUCKET = os.environ.get("AR_TEST_BUCKET", "")
+
+
+@pytest.fixture(params=["local", "gcs"])
+def any_blobs(request, tmp_path):
+    if request.param == "local":
+        yield LocalBlobs(tmp_path / "files")
+        return
+    if not TEST_BUCKET:
+        pytest.skip("set AR_TEST_BUCKET to run against real Cloud Storage")
+    prefix = f"ci-tests/{secrets.token_hex(6)}"
+    gcs = GcsBlobs(TEST_BUCKET, prefix=prefix)
+    yield gcs
+    for blob in gcs.client.list_blobs(gcs.bucket, prefix=prefix + "/"):
+        blob.delete()
+
+
+class TestBlobs:
+    def test_put_get_exists_delete(self, any_blobs):
+        any_blobs.put("churches/1/runs/a/Clase/Niñas/Roster.pdf", b"%PDF-1")
+        any_blobs.put("churches/1/runs/b/Roster.pdf", b"%PDF-2")
+        any_blobs.put("churches/1/logo.png", b"png")
+        any_blobs.put("churches/10/logo.png", b"other")
+        assert any_blobs.get("churches/1/runs/a/Clase/Niñas/Roster.pdf") == b"%PDF-1"
+        assert any_blobs.get("churches/1/missing.pdf") is None
+        assert any_blobs.exists("churches/1/logo.png") and not any_blobs.exists("churches/1/nope.png")
+        any_blobs.delete_prefix("churches/1/runs/a")
+        assert any_blobs.get("churches/1/runs/a/Clase/Niñas/Roster.pdf") is None
+        assert any_blobs.get("churches/1/runs/b/Roster.pdf") == b"%PDF-2"
+        any_blobs.delete_prefix("churches/1")
+        assert any_blobs.get("churches/1/logo.png") is None and any_blobs.get("churches/1/runs/b/Roster.pdf") is None
+        assert any_blobs.get("churches/10/logo.png") == b"other"   # "churches/1" is not a prefix of "churches/10"
+
+    @pytest.mark.parametrize("key", ["churches/../x", "/etc/passwd", "churches//x", ".env", "a/\x00b"])
+    def test_bad_keys_are_refused(self, any_blobs, key):
+        with pytest.raises(ValueError):
+            any_blobs.put(key, b"x")
+
+
 class TestTenantRepo:
     @pytest.mark.parametrize("org_id", ["", "../1", "1/2", "a b", "x" * 80])
     def test_bad_church_ids_are_refused(self, settings, store, org_id):
@@ -200,18 +243,45 @@ class TestTenantRepo:
 
     def test_run_files_cannot_escape_the_run_folder(self, settings, store):
         r = make_church(settings, store, "100", "Uno")
-        folder = r.run_dir("run1")
-        (folder / "Roster.pdf").write_bytes(b"%PDF")
+        r.save_run_file("run1", "Roster.pdf", b"%PDF")
         (settings.files_dir / "secret.pdf").write_bytes(b"%PDF")
-        assert r.run_file("run1", "Roster.pdf") is not None
+        assert r.run_file("run1", "Roster.pdf") == b"%PDF"
         assert r.run_file("run1", "../../../../secret.pdf") is None
         assert r.run_file("../../200/runs/run1", "Roster.pdf") is None
+        with pytest.raises(ValueError):
+            r.save_run_file("run1", "../../escape.pdf", b"x")
+
+    def test_files_are_encrypted_and_bound_to_their_church(self, settings, store):
+        a, b = make_church(settings, store, "100", "Uno"), make_church(settings, store, "200", "Dos")
+        a.save_run_file("run1", "Clase/Pre-K_Niñas/Roster.pdf", b"%PDF-secret-names")
+        a.save_logo(b"\x89PNG-logo")
+        on_disk = settings.files_dir / "churches" / "100" / "runs" / "run1" / "Clase" / "Pre-K_Niñas" / "Roster.pdf"
+        assert on_disk.is_file() and b"secret-names" not in on_disk.read_bytes()
+        assert a.run_file("run1", "Clase/Pre-K_Niñas/Roster.pdf") == b"%PDF-secret-names"
+        assert a.has_logo() and open(a.logo_path(), "rb").read() == b"\x89PNG-logo"
+        # The same bytes copied into another church's folder do not decrypt there.
+        target = settings.files_dir / "churches" / "200" / "runs" / "run1" / "Roster.pdf"
+        target.parent.mkdir(parents=True)
+        target.write_bytes((settings.files_dir / "churches" / "100" / "runs" / "run1" / "Clase" /
+                            "Pre-K_Niñas" / "Roster.pdf").read_bytes())
+        assert b.run_file("run1", "Roster.pdf") is None
+
+    def test_a_successful_run_keeps_only_its_own_files(self, settings, store):
+        r = make_church(settings, store, "100", "Uno")
+        old, new = r.create_run("manual"), r.create_run("manual")
+        for run in (old, new):
+            r.save_run_file(run["id"], "Roster.pdf", b"%PDF")
+            run.update(status="succeeded", outputs=[{"path": "Roster.pdf", "bytes": 4}])
+            r.save_run(run)
+        r.keep_only_files_of(new["id"])
+        assert r.run_file(old["id"], "Roster.pdf") is None and r.run(old["id"])["files_deleted"] is True
+        assert r.run_file(new["id"], "Roster.pdf") == b"%PDF" and not r.run(new["id"]).get("files_deleted")
 
     def test_delete_everything_leaves_nothing(self, settings, store):
         a, b = make_church(settings, store, "100", "Uno"), make_church(settings, store, "200", "Dos")
         a.touch_member("p1", "Ana")
         run = a.create_run("manual")
-        (a.run_dir(run["id"]) / "Roster.pdf").write_bytes(b"%PDF")
+        a.save_run_file(run["id"], "Roster.pdf", b"%PDF")
         a.save_logo(b"png")
         a.delete_everything()
         assert not [p for p in store.docs if p.startswith("churches/100")]
@@ -386,6 +456,46 @@ class TestRuns:
         store.create(f"churches/100/run_claims/after-{first['id']}", {"at": "x"})
         assert r.start_run("schedule") is None
         assert [run["id"] for run in r.runs()] == [first["id"]]
+
+    def test_older_runs_lose_their_files_once_a_new_run_succeeds(self, app):
+        client = TestClient(app)
+        client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)
+        first = client.post("/api/runs", headers=CSRF).json()["id"]
+        second = client.post("/api/runs", headers=CSRF).json()["id"]
+        runs = {r["id"]: r for r in client.get("/api/runs").json()["runs"]}
+        assert runs[second]["files"] == 12 and runs[first]["files"] == 0
+        assert client.get(f"/api/runs/{first}/files/Sunday_School/Nursery/Roster.pdf").status_code == 404
+        assert client.get(f"/api/runs/{second}/files/Sunday_School/Nursery/Roster.pdf").status_code == 200
+
+    def test_a_run_that_cannot_start_does_not_block_the_church(self, settings, store):
+        class Broken:
+            def launch(self, org_id, run_id):
+                raise RuntimeError("Cloud Run said no")
+        client = TestClient(create_app(settings, store, Broken()))
+        client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)
+        assert client.post("/api/runs", headers=CSRF).status_code == 503
+        (run,) = client.get("/api/runs").json()["runs"]
+        assert run["status"] == "failed" and "could not be started" in run["error"]
+        repo = TenantRepo(store, settings.vault, settings.files_dir, demo.ORG_ID)
+        assert repo.active_run() is None
+
+    def test_cloud_run_launcher_starts_one_execution_per_run(self):
+        from advanced_reports.core.cloud_run import CloudRunJobLauncher
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, json=None, timeout=None):
+                self.calls.append((url, json))
+                return type("R", (), {"status_code": 200, "text": ""})()
+        session = Session()
+        job = "projects/p/locations/us-central1/jobs/advanced-reports-runner"
+        CloudRunJobLauncher(job, session=session).launch("100", "run-1")
+        assert session.calls == [(f"https://run.googleapis.com/v2/{job}:run",
+                                  {"overrides": {"containerOverrides": [{"args": ["100", "run-1"]}], "taskCount": 1}})]
+        with pytest.raises(ValueError):
+            CloudRunJobLauncher("advanced-reports-runner")
 
     def test_the_log_never_shows_server_paths(self, app, settings):
         client = TestClient(app)

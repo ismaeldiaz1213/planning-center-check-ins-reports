@@ -22,6 +22,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import quote
 from zoneinfo import available_timezones
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -32,6 +33,7 @@ from pydantic import BaseModel
 from advanced_reports import demo
 from advanced_reports import dispatch as scheduling
 from advanced_reports.core import connections, pco_oauth, session
+from advanced_reports.core.blobs import BlobStore, open_blobs
 from advanced_reports.core.store import Store, open_store
 from advanced_reports.core.tenant_repo import TenantRepo
 from advanced_reports.importers import ibl
@@ -91,15 +93,21 @@ class DevLogin(BaseModel):
 
 
 def create_app(settings: Settings | None = None, store: Store | None = None,
-               launcher: Launcher | None = None) -> FastAPI:
+               launcher: Launcher | None = None, blobs: BlobStore | None = None) -> FastAPI:
     local_server = settings is None       # started by uvicorn, not built by a test
     settings = settings or from_env()
     store = store or open_store(settings)
-    launcher = launcher or SubprocessLauncher()
+    blobs = blobs if blobs is not None else open_blobs(settings)
+    if launcher is None:
+        if settings.runner_job:
+            from advanced_reports.core.cloud_run import CloudRunJobLauncher
+            launcher = CloudRunJobLauncher(settings.runner_job)
+        else:
+            launcher = SubprocessLauncher()
     app = FastAPI(title="Advanced Reports for Planning Center", docs_url=None, redoc_url=None)
 
     def repo_for(org_id: str) -> TenantRepo:
-        return TenantRepo(store, settings.vault, settings.files_dir, org_id)
+        return TenantRepo(store, settings.vault, blobs, org_id)
 
     # ── Session ───────────────────────────────────────────────────────────────
     def current(request: Request) -> dict:
@@ -212,7 +220,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
                 "schedule": {"enabled": False, "day": "sat", "time": "18:00", **(doc.get("schedule") or {})},
                 "schedule_last": doc.get("schedule_last"),
                 "created_at": doc.get("created_at"),
-                "has_logo": repo.logo_path() is not None}
+                "has_logo": repo.has_logo()}
 
     @app.get("/api/me")
     def me(who: dict = Depends(current), repo: TenantRepo = Depends(church_repo)):
@@ -320,10 +328,11 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
         out["progress"] = run.get("progress")
         if out["status"] in ("queued", "running"):
             out["cancelling"] = repo.cancel_requested(run["id"])
-        out["files"] = len(run.get("outputs") or [])
+        outputs = [] if run.get("files_deleted") else run.get("outputs") or []  # D2: older PDFs are gone
+        out["files"] = len(outputs)
         if with_log:
             out["log"] = run.get("log") or []
-            out["outputs"] = run.get("outputs") or []
+            out["outputs"] = outputs
             out["summary"] = run.get("summary") or []
         return out
 
@@ -334,7 +343,11 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
         run = repo.start_run("manual", started_by=who["name"])
         if run is None:
             raise HTTPException(409, "A run is already in progress for this church")
-        launcher.launch(repo.org_id, run["id"])
+        try:
+            launcher.launch(repo.org_id, run["id"])
+        except Exception as exc:
+            repo.fail_to_start(run, "The run could not be started. Please try again in a minute.")
+            raise HTTPException(503, "The run could not be started. Please try again in a minute.") from exc
         return public_run(run, with_log=False, repo=repo)
 
     @app.get("/api/runs")
@@ -380,11 +393,13 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
 
     @app.get("/api/runs/{run_id}/files/{file_path:path}")
     def run_file(run_id: str, file_path: str, repo: TenantRepo = Depends(church_repo)):
-        target = repo.run_file(run_id, file_path)
-        if target is None or target.suffix != ".pdf":
+        data = repo.run_file(run_id, file_path) if file_path.endswith(".pdf") else None
+        if data is None:
             raise HTTPException(404, "File not found")
-        return FileResponse(target, media_type="application/pdf", content_disposition_type="inline",
-                            headers={"Cache-Control": "private, no-store"})
+        name = file_path.rsplit("/", 1)[-1]
+        return Response(data, media_type="application/pdf",
+                        headers={"Cache-Control": "private, no-store",
+                                 "Content-Disposition": f"inline; filename*=UTF-8''{quote(name)}"})
 
     # ── Disconnect ────────────────────────────────────────────────────────────
     @app.post("/api/disconnect", dependencies=[Depends(changing)])
@@ -398,14 +413,14 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
     def internal_dispatch(x_ar_dispatch_key: str = Header(default="")):
         if not settings.dispatch_key or not secrets.compare_digest(x_ar_dispatch_key, settings.dispatch_key):
             raise HTTPException(404, "Not found")
-        return {"started": len(scheduling.dispatch(settings, store, launcher, datetime.now(UTC)))}
+        return {"started": len(scheduling.dispatch(settings, store, launcher, datetime.now(UTC), blobs))}
 
     if local_server and settings.dev_login:
         # No Cloud Scheduler on a developer's machine: check the schedule here once a minute.
         def tick() -> None:
             while True:
                 time.sleep(60)
-                with_errors_ignored(lambda: scheduling.dispatch(settings, store, launcher, datetime.now(UTC)))
+                with_errors_ignored(lambda: scheduling.dispatch(settings, store, launcher, datetime.now(UTC), blobs))
         threading.Thread(target=tick, daemon=True, name="local-schedule").start()
 
     # ── The dashboard page ────────────────────────────────────────────────────

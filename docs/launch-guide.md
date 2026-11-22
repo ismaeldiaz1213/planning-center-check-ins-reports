@@ -232,7 +232,7 @@ Once 1.1, 1.2, 1.4 and 1.6 exist. Estimates are in coding sessions like tonight'
 | 2.2 | **Google Drive connection**: "Connect Google Drive" button, the app creates an *Advanced Reports* folder in the church's Drive, uploads rosters there each run, replaces last week's files in place | 1 session | Client from 1.6 |
 | 2.3 | **IBL Drive delivery that keeps the old folder** (see Phase 3) | ½ session | IBL folder shared with the new service account |
 | 2.4 | **Real Planning Center sign-in**: test against a real org, fix whatever the guesses got wrong, finish "is this person an admin" | ½ session | 1.4 (tested in 1.5) |
-| 2.5 | **Container image and deploy**: one image for the web service and the runner, scripts for staging and production, Cloud Scheduler calling `/internal/dispatch` every 10 minutes | ½–1 session | 1.1, 1.2 |
+| 2.5 | **Container image and deploy** | ✅ Staging live 2026-11-21 at https://advanced-reports-300061322405.us-central1.run.app — `bash deploy/platform.sh staging\|prod` (image built locally, Cloud Run service + job, bucket, scheduler every 10 min). PDFs and logos in Cloud Storage, encrypted per church, latest run only (D2). | — |
 | 2.6 | **What happens to PDFs after a run** (see Decisions) | ¼ session | Your decision |
 | 2.7 | **Privacy policy, terms, and a data-deletion page** | ¼ session to draft | Your review (yours to sign off; not legal advice) |
 | 2.8 | **Liberty-ready polish**: preview with English sample names for English churches, editable volunteer event, address-column widths | ½ session | — |
@@ -399,7 +399,7 @@ an estimate, and `docs/benchmarks.md` will get real numbers once production runs
 | # | Decision | My recommendation | Why |
 |---|---|---|---|
 | D1 | Host the dashboard on Cloud Run directly, or Firebase Hosting in front of it | **Cloud Run directly**, for now | It already serves the pages; one thing to deploy. Use Firebase only if the custom-domain mapping gives trouble. |
-| D2 | Keep copies of each run's PDFs on the platform (for the Rosters tab preview) | **Keep the latest run only**, in an encrypted Cloud Storage bucket, deleted when the next run finishes | The Rosters tab stays useful, and you never hold more than one week of children's data. The alternative (keep nothing, link to Drive) is more private but the Rosters tab becomes a list of links. |
+| D2 | Keep copies of each run's PDFs on the platform (for the Rosters tab preview) | ✅ **Decided 2026-11-21: latest run only**, in an encrypted Cloud Storage bucket, deleted when the next run finishes. Owner's rule: stay inside free tiers. | The Rosters tab stays useful, and you never hold more than one week of children's data. The alternative (keep nothing, link to Drive) is more private but the Rosters tab becomes a list of links. |
 | D3 | IBL's Drive folder | **Keep the old folder** via service account (3.1) | Zero change for teachers. |
 | D4 | Where the session should start | **2.1 + 2.5 first** (store and deploy to staging), then 2.2 | You get a real URL to click early, and every later piece can be tested online. |
 | D5 | Reply time you promise on the Help page | Currently "A real person reads every message" (no time promise) | Promise only what you can keep while working at IBL. |
