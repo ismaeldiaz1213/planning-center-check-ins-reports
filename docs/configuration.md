@@ -81,7 +81,7 @@ runs without authentication (any request is accepted — local development only)
 | `RUTAS_SUBTITLE` | `Ministerio de Autobuses` | Subtitle shown in bus roster headers |
 | `CHURCH_VERSE_TEXT` | `"Id por todo el mundo y predicad el evangelio a toda criatura"` | Verse text shown in PDF footers |
 | `CHURCH_VERSE_REF` | `Marcos 16:15 — RV1960` | Verse reference shown in PDF footers |
-| `PCO_SESSION_COOKIE` | *(none)* | Only needed for `backend/promote_checkins.py` (grade promotion) — see [docs/grade-promotion.md](grade-promotion.md) |
+| `PCO_SESSION_COOKIE` | *(none)* | Only needed for the check-in tools (`promote_checkins.py`, `backfill_bus_class.py`, `checkin_people_list.py`) — see [docs/check-in-tools.md](check-in-tools.md) |
 | `PCO_CSRF_TOKEN` | *(none)* | Same as above |
 | `REPORTS_CONFIG` | *(unset — `reports.yaml` at the project root)* | Explicit path to the report definitions file. See [docs/reports.md](reports.md). |
 | `CHURCH_TIMEZONE` | `America/Chicago` | Local time zone for Sunday dates and volunteer check-in times. |

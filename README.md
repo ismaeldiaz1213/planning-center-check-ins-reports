@@ -68,6 +68,9 @@ See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough,
 - **Fully automated** via Google Cloud Run + Cloud Scheduler
 - **Grade promotion** — move a Sunday school class up a grade in Check-Ins pre-select
   history ahead of promotion weekend (`backend/promote_checkins.py`)
+- **Roster to pre-select** — check a class roster spreadsheet into a class for last
+  Sunday, for any church, reporting names that don't match Planning Center
+  (`backend/checkin_people_list.py`, see [docs/check-in-tools.md](docs/check-in-tools.md))
 
 ---
 

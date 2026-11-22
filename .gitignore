@@ -6,3 +6,5 @@ backend/static/
 *.pyc
 .vite/
 out
+.env.*
+!.env.example
