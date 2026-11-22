@@ -54,8 +54,10 @@ def dispatch(settings: Settings, store: Store, launcher, now_utc: datetime) -> l
             continue
         if not (repo.module(checkin_reports.MODULE_ID) or {}).get("reports"):
             continue
+        run = repo.start_run("schedule", started_by="")
+        if run is None:
+            continue
         repo.update_church({"schedule_last": today})
-        run = repo.create_run("schedule", started_by="")
         launcher.launch(org_id, run["id"])
         started.append(org_id)
     return started

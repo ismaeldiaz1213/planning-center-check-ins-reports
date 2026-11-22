@@ -32,7 +32,7 @@ from pydantic import BaseModel
 from advanced_reports import demo
 from advanced_reports import dispatch as scheduling
 from advanced_reports.core import connections, pco_oauth, session
-from advanced_reports.core.store import FileStore, Store
+from advanced_reports.core.store import Store, open_store
 from advanced_reports.core.tenant_repo import TenantRepo
 from advanced_reports.importers import ibl
 from advanced_reports.modules import checkin_reports
@@ -94,7 +94,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
                launcher: Launcher | None = None) -> FastAPI:
     local_server = settings is None       # started by uvicorn, not built by a test
     settings = settings or from_env()
-    store = store or FileStore(settings.store_dir)
+    store = store or open_store(settings)
     launcher = launcher or SubprocessLauncher()
     app = FastAPI(title="Advanced Reports for Planning Center", docs_url=None, redoc_url=None)
 
@@ -331,9 +331,9 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
     def start_run(who: dict = Depends(current), repo: TenantRepo = Depends(church_repo)):
         if not (repo.module(checkin_reports.MODULE_ID) or {}).get("reports"):
             raise HTTPException(409, "Set up at least one report first")
-        if repo.active_run():
+        run = repo.start_run("manual", started_by=who["name"])
+        if run is None:
             raise HTTPException(409, "A run is already in progress for this church")
-        run = repo.create_run("manual", started_by=who["name"])
         launcher.launch(repo.org_id, run["id"])
         return public_run(run, with_log=False, repo=repo)
 

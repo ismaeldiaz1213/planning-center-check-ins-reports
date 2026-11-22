@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 
 from advanced_reports.core import connections
-from advanced_reports.core.store import FileStore, Store
+from advanced_reports.core.store import Store, open_store
 from advanced_reports.core.tenant_repo import TenantRepo, now_iso
 from advanced_reports.modules import checkin_reports
 from advanced_reports.settings import Settings, from_env
@@ -220,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: python -m advanced_reports.runner <org_id> <run_id>", file=sys.stderr)
         return 2
     settings = from_env()
-    return 0 if execute(settings, FileStore(settings.store_dir), args[0], args[1]) else 1
+    return 0 if execute(settings, open_store(settings), args[0], args[1]) else 1
 
 
 if __name__ == "__main__":

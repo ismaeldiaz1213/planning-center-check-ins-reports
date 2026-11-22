@@ -140,6 +140,22 @@ class TenantRepo:
         if _RUN_ID.match(run_id):
             shutil.rmtree(self._files / "runs" / run_id, ignore_errors=True)
 
+    def start_run(self, trigger: str, started_by: str = "") -> dict | None:
+        """Create a run unless one is already queued or running. None means "busy".
+
+        Race-free: the newest run is read, then a claim document named after it
+        is created atomically. Two requests that read the same newest run race
+        for the same claim, and only one wins. A request that reads after the
+        winner's run exists sees it as active and backs off.
+        """
+        if self.active_run():
+            return None
+        newest = self.runs(limit=1)
+        after = newest[0]["id"] if newest else "none"
+        if not self._store.create(f"{self._root}/run_claims/after-{after}", {"at": now_iso()}):
+            return None
+        return self.create_run(trigger, started_by)
+
     def active_run(self) -> dict | None:
         """The church's queued or running run, if any (one at a time)."""
         cutoff = (datetime.now(UTC) - STALE_RUN).strftime("%Y-%m-%dT%H:%M:%SZ")

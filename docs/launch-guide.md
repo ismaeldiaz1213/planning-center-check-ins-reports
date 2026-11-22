@@ -60,7 +60,7 @@ _Rewritten 2026-11-21 with exact steps. Progress so far was checked with `gcloud
 | 1.3 | Budget alerts | ✅ Done by the owner (2026-11-21) |
 | 1.4 | Planning Center sign-in app, **owned by IBL** for now | ✅ Created 2026-11-21; client ID and secret in `backend/.env` (not yet in Secret Manager) |
 | 1.5 | Test sign-in on your laptop | ✅ Worked first try with IBL (2026-11-21) |
-| 1.6 | Google sign-in app for Drive | ⬜ **Next** |
+| 1.6 | Google sign-in app for Drive | 🟡 Client created 2026-11-21 (JSON downloaded); app stays in *Testing* until the privacy page and domain exist, then publish |
 | 1.7 | Domain `reports.mannabyte.com` | ⬜ Later; the deploy session tells you the exact record |
 
 **Not needed now** (dropped from the earlier version of this guide):
@@ -168,14 +168,24 @@ This is how a church lets the app save rosters into its own Google Drive. Do it 
    require a security review.
 3. Left menu, **Clients** → **Create client**:
    - **Application type:** Web application. **Name:** `Advanced Reports web`.
-   - **Authorized redirect URIs** → **Add URI**:
+   - Leave **Authorized JavaScript origins** (the first section) empty; it's for
+     browser-only apps and rejects any address with a path.
+   - In the **second** section, **Authorized redirect URIs** → **Add URI**:
      `http://localhost:8000/auth/google/callback`
+   - Leave "Use this client for an AI-powered agent" unchecked.
      (production and staging addresses get added at deploy time).
    - **Create**. A box shows the client ID and secret. Click **Download JSON** and keep
      the file outside the repo, e.g. in `~/Documents/secrets/`.
-4. Left menu, **Audience** → **Publish app** → Confirm. It must say **In production**.
-   In *Testing* mode, Google sign-ins expire after 7 days, and every church's weekly run
-   would break after a week.
+4. Left menu, **Audience** → **Test users** → **Add users**: add every Google account
+   used for testing (your mannabyte.com account, and the account that will own a test
+   church's rosters). Leave the app in **Testing** for now.
+   **Publish app** stays greyed out until Branding has a homepage and a privacy policy
+   URL, and those pages don't exist until Phase 2 (2.7) and the domain (1.7). In
+   *Testing*, a Drive connection expires after 7 days, which is fine for testing.
+   **Publish before any church relies on weekly runs:** fill in Branding (homepage
+   `https://reports.mannabyte.com`, privacy `https://reports.mannabyte.com/privacy`,
+   authorized domain `mannabyte.com`), then **Publish app** so it says
+   **In production**. Don't use placeholder links; Google checks them.
 5. Tell the session where you saved the JSON file. It puts the values in Secret Manager
    (`google-oauth-client-id`, `google-oauth-client-secret`) for you.
 
@@ -218,7 +228,7 @@ Once 1.1, 1.2, 1.4 and 1.6 exist. Estimates are in coding sessions like tonight'
 
 | # | Work | Estimate | Needs from you |
 |---|---|---|---|
-| 2.1 | **Firestore store**: the same four operations as today's JSON store, plus a transaction for "one run at a time" | ½ session | Project from 1.1 |
+| 2.1 | **Firestore store**: the same four operations as today's JSON store, plus a transaction for "one run at a time" | ✅ Done 2026-11-21: `core/firestore_store.py`, `AR_FIRESTORE_PROJECT`; store checks pass against real staging Firestore | Project from 1.1 |
 | 2.2 | **Google Drive connection**: "Connect Google Drive" button, the app creates an *Advanced Reports* folder in the church's Drive, uploads rosters there each run, replaces last week's files in place | 1 session | Client from 1.6 |
 | 2.3 | **IBL Drive delivery that keeps the old folder** (see Phase 3) | ½ session | IBL folder shared with the new service account |
 | 2.4 | **Real Planning Center sign-in**: test against a real org, fix whatever the guesses got wrong, finish "is this person an admin" | ½ session | 1.4 (tested in 1.5) |

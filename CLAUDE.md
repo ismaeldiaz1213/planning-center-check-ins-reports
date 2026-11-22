@@ -26,6 +26,12 @@ into **Advanced Reports for Planning Center**, a multi-church hosted platform.
 
 ## Environment
 - Python: `backend/.venv` (3.11). Tests: `cd backend && .venv/bin/python -m pytest`.
+- Firestore store checks against real staging (writes under a throwaway `ci-tests/…`,
+  deleted afterwards): `GOOGLE_CLOUD_QUOTA_PROJECT=mannabyte-reports-staging
+  AR_TEST_FIRESTORE_PROJECT=mannabyte-reports-staging .venv/bin/python -m pytest tests/platform -k Stores`.
+  Needs `gcloud auth application-default login` as ismael@mannabyte.com.
+- Google Cloud: `mannabyte-reports-staging` and `mannabyte-reports-prod` (Mannabyte account).
+  IBL's old weekly job lives in `ibl-planning-center-check-ins` (IBL account); leave it alone.
 - Local platform: `cd backend && AR_DEV_LOGIN=1 .venv/bin/uvicorn advanced_reports.app:create_app --factory --port 8000`.
 - The Planning Center MCP connector is read-only and connected to one church at a time.
   Check which one with `people_current_organization`.

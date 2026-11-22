@@ -8,6 +8,8 @@
 # The isolation tests are the important ones (plan §3.7): two churches in one
 # service, and neither can read, list, change, run or download the other's.
 
+import os
+import secrets
 import time
 
 import pytest
@@ -109,9 +111,26 @@ class TestCrypto:
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 
-@pytest.fixture(params=["memory", "file"])
+# The Firestore store runs the same checks only when pointed at a real project:
+#   AR_TEST_FIRESTORE_PROJECT=mannabyte-reports-staging pytest tests/platform -k Stores
+# Everything goes under a throwaway "ci-tests/<random>" prefix, deleted afterwards.
+FIRESTORE_TEST_PROJECT = os.environ.get("AR_TEST_FIRESTORE_PROJECT", "")
+
+
+@pytest.fixture(params=["memory", "file", "firestore"])
 def any_store(request, tmp_path):
-    return MemoryStore() if request.param == "memory" else FileStore(tmp_path / "store")
+    if request.param == "memory":
+        yield MemoryStore()
+    elif request.param == "file":
+        yield FileStore(tmp_path / "store")
+    else:
+        if not FIRESTORE_TEST_PROJECT:
+            pytest.skip("set AR_TEST_FIRESTORE_PROJECT to run against real Firestore")
+        from advanced_reports.core.firestore_store import FirestoreStore
+        run_doc = f"ci-tests/{secrets.token_hex(6)}"
+        fs = FirestoreStore(FIRESTORE_TEST_PROJECT, prefix=run_doc)
+        yield fs
+        fs.client.recursive_delete(fs.client.document(run_doc))
 
 
 class TestStores:
@@ -126,6 +145,26 @@ class TestStores:
         any_store.delete_tree("churches/1")
         assert any_store.get("churches/1") is None and any_store.list("churches/1/runs") == []
         assert any_store.get("churches/2/runs/z") == {"id": "z"}
+
+    def test_documents_come_back_exactly(self, any_store):
+        doc = {"grid": [[1, 2], [3, [4, 5]]], "big": 2 ** 70, "text": "Niñas · 🙂", "none": None,
+               "nested": {"a.b": {"": "empty key"}}, "flag": False, "ratio": 0.1}
+        any_store.set("churches/1/modules/x", doc)
+        assert any_store.get("churches/1/modules/x") == doc
+
+    def test_create_only_once(self, any_store):
+        assert any_store.create("churches/1/run_claims/after-none", {"n": 1}) is True
+        assert any_store.create("churches/1/run_claims/after-none", {"n": 2}) is False
+        assert any_store.get("churches/1/run_claims/after-none") == {"n": 1}
+
+    def test_delete_tree_reaches_every_depth(self, any_store):
+        any_store.set("churches/1/runs/a/signals/cancel", {"at": "x"})
+        any_store.set("churches/1/runs/a", {"id": "a"})
+        any_store.set("churches/10", {"other": True})
+        any_store.delete_tree("churches/1")
+        assert any_store.get("churches/1/runs/a/signals/cancel") is None
+        assert any_store.get("churches/1/runs/a") is None
+        assert any_store.get("churches/10") == {"other": True}
 
     @pytest.mark.parametrize("path", ["churches/../x", "churches/1/runs", "/etc/passwd", "churches/a b", ""])
     def test_bad_paths_are_refused(self, any_store, path):
@@ -336,6 +375,17 @@ class TestRuns:
         listed = client.get("/api/runs").json()["runs"]
         assert listed[0]["id"] == run["id"] and "log" not in listed[0] and listed[0]["files"] == 12
         assert launcher.launched == [(demo.ORG_ID, run["id"])]
+
+    def test_only_one_run_at_a_time_even_when_requests_race(self, settings, store):
+        r = make_church(settings, store, "100", "Uno")
+        first = r.start_run("manual")
+        assert first is not None and r.start_run("manual") is None      # busy
+        first["status"] = "succeeded"
+        r.save_run(first)
+        # A second request that read the same newest run has already claimed the slot:
+        store.create(f"churches/100/run_claims/after-{first['id']}", {"at": "x"})
+        assert r.start_run("schedule") is None
+        assert [run["id"] for run in r.runs()] == [first["id"]]
 
     def test_the_log_never_shows_server_paths(self, app, settings):
         client = TestClient(app)

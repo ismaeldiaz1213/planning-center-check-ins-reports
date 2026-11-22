@@ -49,6 +49,7 @@ _Last updated: 2026-11-14 (Saturday, late; session paused mid step 3)_
 | Milestone 1 step 4: platform core | 🟡 **Runs locally** (`backend/advanced_reports/`). Not built: Firestore store, Google Drive connection, scheduler/dispatch. Planning Center OAuth is written but has never met the real service. See "Steps 4–5" below. |
 | Milestone 1 step 5: minimal dashboard | 🟡 **Third pass 2026-11-14**: home page, sign-in, and a dashboard with Overview, Rosters, Set up (wizard with live preview), Schedule, Help and Settings. Light/dark, English/Spanish, phone and desktop. Static files served by the API (`advanced_reports/static/`), not the React app. |
 | Milestone 1 steps 6–7 | ⬜ Not started; blocked on the accounts above |
+| Launch Phase 2.1: Firestore store | ✅ Done 2026-11-21. `FirestoreStore` (one JSON string per document), chosen by `AR_FIRESTORE_PROJECT`. Race-free one-run-at-a-time via atomic claim documents (`TenantRepo.start_run`). The same store checks run against memory, files and real staging Firestore. Run outputs and logos are still local files: they need Cloud Storage before the web service and runner can be separate containers (decision D2). |
 | Milestones 2–5 | ⬜ Not started |
 
 **Next action:** the owner works through Phase 1 of [`docs/launch-guide.md`](launch-guide.md) (accounts, secrets, OAuth apps). The next session starts at Phase 2 there: Firestore store and deploy to staging first.

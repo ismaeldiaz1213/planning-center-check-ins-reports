@@ -8,8 +8,10 @@
 #                 and the local demo. The web process and the runner process
 #                 share it through the filesystem.
 #
-# A Firestore-backed store with the same four methods is what production needs;
-# it is not written yet (no Google Cloud project exists to run it against).
+#   FirestoreStore  production (core/firestore_store.py)
+#
+# create() writes a document only if it does not exist yet, atomically. It is
+# what makes "one run at a time" hold when two requests race (TenantRepo.start_run).
 #
 # Only TenantRepo may use a store (plan §3.7 rule 2).
 
@@ -37,6 +39,7 @@ def check_path(path: str) -> list[str]:
 class Store(Protocol):
     def get(self, path: str) -> dict | None: ...
     def set(self, path: str, data: dict) -> None: ...
+    def create(self, path: str, data: dict) -> bool: ...
     def list(self, collection: str) -> list[tuple[str, dict]]: ...
     def delete_tree(self, path: str) -> None: ...
 
@@ -52,6 +55,13 @@ class MemoryStore:
     def set(self, path, data):
         check_path(path)
         self.docs[path] = json.loads(json.dumps(data))
+
+    def create(self, path, data):
+        check_path(path)
+        if path in self.docs:
+            return False
+        self.set(path, data)
+        return True
 
     def list(self, collection):
         depth = collection.count("/") + 2
@@ -89,6 +99,20 @@ class FileStore:
             json.dump(data, fh, ensure_ascii=False)
         os.replace(tmp, target)
 
+    def create(self, path, data):
+        target = self._file(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False)
+        try:
+            os.link(tmp, target)  # fails if the target exists, atomically
+            return True
+        except FileExistsError:
+            return False
+        finally:
+            os.unlink(tmp)
+
     def list(self, collection):
         folder = self.root.joinpath(*collection.split("/"))
         if not folder.is_dir():
@@ -104,3 +128,11 @@ class FileStore:
     def delete_tree(self, path):
         self._file(path).unlink(missing_ok=True)
         shutil.rmtree(self.root.joinpath(*check_path(path)), ignore_errors=True)
+
+
+def open_store(settings) -> Store:
+    """The store the settings ask for: Firestore when a project is set, else files."""
+    if settings.firestore_project:
+        from advanced_reports.core.firestore_store import FirestoreStore  # needs google-cloud-firestore
+        return FirestoreStore(settings.firestore_project, settings.firestore_database)
+    return FileStore(settings.store_dir)

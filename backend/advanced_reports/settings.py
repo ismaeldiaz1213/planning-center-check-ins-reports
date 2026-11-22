@@ -11,6 +11,9 @@
 #   AR_BASE_URL            public address, used for OAuth redirect URIs
 #   PCO_OAUTH_CLIENT_ID / PCO_OAUTH_CLIENT_SECRET
 #   AR_DISPATCH_KEY        shared secret the scheduler sends to /internal/dispatch
+#   AR_FIRESTORE_PROJECT   keep documents in this Google Cloud project's Firestore
+#                          (unset: one JSON file per document under AR_DATA_DIR)
+#   AR_FIRESTORE_DATABASE  Firestore database id (default "(default)")
 #
 # With AR_DEV_LOGIN=1 a missing master key or session secret is generated and
 # kept in AR_DATA_DIR, so a local demo needs no setup. Without it both are
@@ -39,6 +42,8 @@ class Settings:
     pco_client_secret: str = ""
     dispatch_key: str = ""        # shared secret for POST /internal/dispatch; empty turns the route off
     demo_step_s: float = 0.0      # pause per Planning Center call for the sample church, so progress is visible
+    firestore_project: str = ""   # empty: FileStore under data_dir
+    firestore_database: str = "(default)"
 
     @property
     def vault(self) -> Vault:
@@ -85,4 +90,6 @@ def from_env(env: dict | None = None) -> Settings:
         pco_client_secret=env.get("PCO_OAUTH_CLIENT_SECRET", ""),
         dispatch_key=env.get("AR_DISPATCH_KEY", ""),
         demo_step_s=float(env.get("AR_DEMO_STEP_SECONDS") or (0.2 if dev else 0)),
+        firestore_project=env.get("AR_FIRESTORE_PROJECT", "").strip(),
+        firestore_database=env.get("AR_FIRESTORE_DATABASE", "").strip() or "(default)",
     )
