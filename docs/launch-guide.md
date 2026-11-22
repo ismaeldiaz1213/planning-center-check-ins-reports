@@ -9,7 +9,7 @@ where something depends on someone else replying, that is called out.
 
 Read [Where things stand](#where-things-stand) first. The short version of the plan:
 
-1. **You** create the accounts only you can create (about 3–4 hours, spread over a few days).
+1. **You** create the accounts only you can create (about 1 hour left as of 2026-11-21).
 2. **The next sessions** build what is missing for production: database, Google Drive,
    real sign-in, deploy (about 4–6 working sessions).
 3. **IBL runs on both systems side by side** for two Sundays, without teachers noticing.
@@ -51,156 +51,177 @@ separate volunteer event that IBL's bus report uses (IBL's existing setting is k
 
 ## Phase 1 — Accounts only you can create
 
-**Total: about 3–4 hours of your time, plus waiting for Planning Center to reply.**
-Do 1.1–1.3 first; they unblock the most work.
+_Rewritten 2026-11-21 with exact steps. Progress so far was checked with `gcloud`._
 
-> **Never paste a secret (client secret, key, token) into the chat.** Put it into Secret
-> Manager with the commands below and tell the session only the secret's *name*.
+| Step | What | State |
+|---|---|---|
+| 1.1 | Google Cloud projects `mannabyte-reports-staging` and `mannabyte-reports-prod`: billing, services, Firestore (us-central1) | ✅ Done |
+| 1.2 | Platform secrets | ✅ Staging and production (2026-11-21) |
+| 1.3 | Budget alerts | ✅ Done by the owner (2026-11-21) |
+| 1.4 | Planning Center sign-in app, **owned by IBL** for now | ✅ Created 2026-11-21; client ID and secret in `backend/.env` (not yet in Secret Manager) |
+| 1.5 | Test sign-in on your laptop | ✅ Worked first try with IBL (2026-11-21) |
+| 1.6 | Google sign-in app for Drive | ⬜ **Next** |
+| 1.7 | Domain `reports.mannabyte.com` | ⬜ Later; the deploy session tells you the exact record |
 
-### 1.1 Google Cloud projects (≈ 45 min)
+**Not needed now** (dropped from the earlier version of this guide):
+- **A Mannabyte Planning Center account.** The app is owned by IBL for now. See
+  [Moving the app to Mannabyte later](#moving-the-app-to-mannabyte-later).
+- **Emailing Planning Center support.** The important question ("how does the app know
+  someone is a church admin?") was answered by checking real data: your Liberty profile
+  has `site_administrator: true`, which is what the sign-in code checks. The other
+  questions (charging churches, app name) only matter for the public launch. Ask them in
+  December.
+- **A fake test church.** We test with Liberty and IBL. Signing in only reads data.
 
-You already have the organization and billing account. Create two projects: one to test
-on (staging) and one for churches (production).
+> **Never paste a secret (client secret, key, token) into the chat.** Secrets go into a
+> git-ignored file or into Secret Manager. Tell the session only that they're saved.
 
-1. Pick project IDs. Suggested: `mannabyte-reports-staging` and `mannabyte-reports-prod`
-   (IDs are permanent and globally unique; if taken, add a suffix).
-2. In a terminal (or Cloud Shell):
+### 1.2 Production secrets (≈ 2 min)
 
-   ```bash
-   gcloud auth login                       # your mannabyte.com account, not IBL's
-   gcloud organizations list               # note the ORG ID
-   gcloud billing accounts list            # note the BILLING ACCOUNT ID
-
-   for P in mannabyte-reports-staging mannabyte-reports-prod; do
-     gcloud projects create "$P" --organization=ORG_ID
-     gcloud billing projects link "$P" --billing-account=BILLING_ACCOUNT_ID
-     gcloud services enable run.googleapis.com firestore.googleapis.com \
-       cloudscheduler.googleapis.com secretmanager.googleapis.com \
-       artifactregistry.googleapis.com cloudbuild.googleapis.com \
-       iamcredentials.googleapis.com drive.googleapis.com --project="$P"
-     gcloud firestore databases create --location=us-central1 --project="$P"
-   done
-   ```
-
-3. **Budget alerts (do not skip).** Console → Billing → Budgets & alerts → Create budget.
-   One budget per project, amount **$10/month**, email alerts at 50%, 90% and 100%.
-   A budget only emails you; it does not stop spending. At this size an alert almost
-   certainly means a bug (for example a run stuck in a loop), so look the same day.
-
-### 1.2 Secrets the platform needs (≈ 15 min, after 1.1)
-
-Run once per project. These generate the values on your machine and put them straight
-into Secret Manager, so they never appear on screen or in chat.
+In this Claude Code session, type each line with a leading `!` so it runs here. It
+creates three random keys straight in Secret Manager; you never see their values, and
+there is nothing to copy.
 
 ```bash
-P=mannabyte-reports-staging     # then repeat with mannabyte-reports-prod
-
-python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode(),end='')" \
-  | gcloud secrets create ar-master-key --data-file=- --project="$P"
-python3 -c "import secrets;print(secrets.token_urlsafe(48),end='')" \
-  | gcloud secrets create ar-session-secret --data-file=- --project="$P"
-python3 -c "import secrets;print(secrets.token_urlsafe(32),end='')" \
-  | gcloud secrets create ar-dispatch-key --data-file=- --project="$P"
+! P=mannabyte-reports-prod; python3 -c "import base64,os;print(base64.urlsafe_b64encode(os.urandom(32)).decode(),end='')" | gcloud secrets create ar-master-key --data-file=- --project=$P
+! P=mannabyte-reports-prod; python3 -c "import secrets;print(secrets.token_urlsafe(48),end='')" | gcloud secrets create ar-session-secret --data-file=- --project=$P
+! P=mannabyte-reports-prod; python3 -c "import secrets;print(secrets.token_urlsafe(32),end='')" | gcloud secrets create ar-dispatch-key --data-file=- --project=$P
 ```
 
-**The master key protects every church's stored connection. If it is lost, every church
-must reconnect; if it leaks, rotate it.** Do not delete or overwrite `ar-master-key`
-once churches are connected.
+Each line should end with `Created version [1] of the secret [...]`. If one says the
+secret **already exists**, stop there: don't delete or overwrite `ar-master-key`.
 
-### 1.3 Planning Center OAuth app (≈ 30 min, plus waiting)
+### 1.3 Budget alerts (≈ 5 min)
 
-1. Create a Planning Center account for Mannabyte Labs using a mannabyte.com address.
-2. Go to `https://api.planningcenteronline.com/oauth/applications` and create an
-   application named **Advanced Reports**.
-3. Add these redirect URIs (exactly):
-   - `http://localhost:8000/auth/pco/callback`
-   - `https://STAGING-URL/auth/pco/callback` (add once staging has an address; the
-     next session will tell you what it is)
-   - `https://reports.mannabyte.com/auth/pco/callback`
-4. The app asks for the scopes `people` and `check_ins` (read only in practice; the code
-   never writes to Planning Center).
-5. Store the client ID and secret:
+1. Open <https://console.cloud.google.com/billing>, signed in as ismael@mannabyte.com.
+2. Pick the billing account, then **Budgets & alerts** in the left menu.
+3. If you already see a budget for each project, you're done. If not, click
+   **Create budget**:
+   - **Name:** `reports-prod`. **Projects:** only `mannabyte-reports-prod`. Next.
+   - **Budget type:** Specified amount, **$10**. Next.
+   - **Thresholds:** 50%, 90%, 100% of actual spend. Keep "Email alerts to billing
+     admins and users" checked. **Finish**.
+4. Repeat for `mannabyte-reports-staging` (name `reports-staging`).
 
-   ```bash
-   for P in mannabyte-reports-staging mannabyte-reports-prod; do
-     printf '%s' 'PASTE_CLIENT_ID'     | gcloud secrets create pco-oauth-client-id     --data-file=- --project="$P"
-     read -rs -p "PCO client secret: " S; printf '%s' "$S" \
-       | gcloud secrets create pco-oauth-client-secret --data-file=- --project="$P"; echo
-   done
+A budget only emails you; it doesn't stop spending. At this size, an alert almost always
+means a bug, so look the same day.
+
+### 1.4 Planning Center sign-in app, owned by IBL (≈ 10 min)
+
+This registers the "Sign in with Planning Center" button. Planning Center gives you a
+**client ID** and a **client secret** that the website uses to prove who it is.
+
+The app belongs to whichever church you're signed in as when you create it. Ownership
+only decides who can manage the app. It doesn't give the app access to that church's
+data: every church connects separately by signing in itself.
+
+1. Sign in at <https://login.planningcenteronline.com>.
+2. **Switch to IBL first.** Click your name or picture in the top-right corner and pick
+   **Iglesia Bautista Libertad** from the church list. If it already says IBL, skip
+   this.
+3. Go to <https://api.planningcenteronline.com/oauth/applications>. The page has a
+   *Personal Access Tokens* section and an *OAuth Applications* section. Don't confuse
+   them: you want **OAuth Applications**.
+4. Click **New Application** in the OAuth Applications section. Exact labels may differ
+   slightly; fill in by meaning:
+   - **Name:** `Advanced Reports`
+   - **Description / URL / Homepage**, if asked: `https://mannabyte.com`
+   - **Callback URL** (it may say *Redirect URI*): type exactly
+     `http://localhost:8000/auth/pco/callback`
+     This is where Planning Center sends people back after they sign in. For now it's
+     your laptop. The staging and production addresses get added later, when they
+     exist; the deploy session will give you the exact text.
+   - If it asks about **scopes**, choose **People** and **Check-Ins**.
+5. Save. The page now shows a **Client ID** and a **Secret**. Leave the tab open.
+6. Open `backend/.env` in a text editor. It's git-ignored, so it never gets committed.
+   Add these two lines at the bottom:
    ```
+   PCO_OAUTH_CLIENT_ID=the-client-id
+   PCO_OAUTH_CLIENT_SECRET=the-secret
+   ```
+   Save the file. Tell the session "1.4 done" without pasting the values.
 
-   (The client ID is not secret, but keeping both in one place is simpler.)
+If something on the page doesn't match these steps, take a screenshot and share it.
+That's faster than guessing.
 
-6. **A test church.** You need a Planning Center organization with Check-Ins and some
-   made-up people to test sign-in against. Ask Planning Center (step 1.4) whether they
-   provide a developer sandbox. If not, the options are a small paid Check-Ins
-   subscription for a fake church, or testing sign-in against IBL with leadership's OK
-   (sign-in only reads). **I don't know Planning Center's current pricing for this;
-   check before paying.**
+### 1.5 Test sign-in on your laptop (≈ 10 min of your time)
 
-### 1.4 Email Planning Center developer support (≈ 20 min to write; replies take days)
+The session starts the website locally with real sign-in turned on. You open
+`http://localhost:8000`, click **Sign in with Planning Center**, pick **Liberty**, and
+approve. The session fixes whatever breaks. Nothing goes to Google Cloud yet; the client
+ID and secret go into Secret Manager during the deploy.
 
-Send this early because you will wait for it. Ask:
+### 1.6 Google sign-in app for Drive (≈ 30 min, production project)
 
-1. May a hosted app charge churches a subscription, and are there rules for listing it?
-2. Is there a developer sandbox organization with Check-Ins?
-3. **How should an app tell that the signed-in person is an organization administrator?**
-   The sign-in code currently checks a field called `site_administrator` on the person
-   record. That is a guess; if it is wrong, either nobody can sign up or anybody can.
-   This must be confirmed before Liberty signs in.
-4. Is "Advanced Reports for Planning Center" an acceptable name, or should it avoid
-   "Planning Center" in the title?
+This is how a church lets the app save rosters into its own Google Drive. Do it after
+1.5. The Drive connection is built in Phase 2, so it isn't urgent.
 
-### 1.5 Google OAuth client for Drive (≈ 45 min, production project)
+1. Open <https://console.cloud.google.com/auth/overview?project=mannabyte-reports-prod>
+   (Google Auth Platform). If it shows **Get started**, click it:
+   - **App name:** `Advanced Reports`. **User support email:** your mannabyte.com
+     address. Next.
+   - **Audience:** **External**. Next.
+   - **Contact information:** your mannabyte.com address. Next, agree, **Create**.
+2. Left menu, **Data Access** → **Add or remove scopes**. In the filter box type
+   `drive.file`, tick `.../auth/drive.file`, **Update**, then **Save**. Add nothing
+   else. This scope only lets the app see files it created, which is why Google doesn't
+   require a security review.
+3. Left menu, **Clients** → **Create client**:
+   - **Application type:** Web application. **Name:** `Advanced Reports web`.
+   - **Authorized redirect URIs** → **Add URI**:
+     `http://localhost:8000/auth/google/callback`
+     (production and staging addresses get added at deploy time).
+   - **Create**. A box shows the client ID and secret. Click **Download JSON** and keep
+     the file outside the repo, e.g. in `~/Documents/secrets/`.
+4. Left menu, **Audience** → **Publish app** → Confirm. It must say **In production**.
+   In *Testing* mode, Google sign-ins expire after 7 days, and every church's weekly run
+   would break after a week.
+5. Tell the session where you saved the JSON file. It puts the values in Secret Manager
+   (`google-oauth-client-id`, `google-oauth-client-secret`) for you.
 
-This is how a church lets the app save rosters into its own Google Drive.
+Google may ask you to verify the brand later, when privacy and terms pages exist. That
+uses the domain step below.
 
-1. Console → **Google Auth Platform** (formerly "OAuth consent screen") in
-   `mannabyte-reports-prod`.
-2. **Branding:** app name *Advanced Reports*, support email `support@mannabyte.com`
-   (or your address), logo optional, home page `https://reports.mannabyte.com`,
-   privacy policy and terms URLs (the pages from Phase 2; you can add them later, but
-   you need them before publishing).
-3. **Audience:** *External*. Then **Publish app** so it is *In production*.
-   **Important:** while it says *Testing*, Google refresh tokens expire after 7 days,
-   and every church's weekly run would break after a week.
-4. **Data access:** add only `https://www.googleapis.com/auth/drive.file`. This scope
-   only lets the app see files it created or that the user picked, which is why Google
-   treats it as non-sensitive. Expect no security review; you may be asked to verify
-   the brand (domain ownership, step 1.6).
-5. **Clients → Create client → Web application.** Authorized redirect URI:
-   `https://reports.mannabyte.com/auth/google/callback` (plus the staging one later, and
-   `http://localhost:8000/auth/google/callback` for development).
-6. Store it in both projects as `google-oauth-client-id` / `google-oauth-client-secret`
-   the same way as step 1.3.5.
+### 1.7 Domain (later, ≈ 20 min)
 
-### 1.6 Domain (≈ 20 min, then up to a day for DNS)
+When the production deploy is ready, the session gives you one DNS record for
+`reports.mannabyte.com`. You add it wherever mannabyte.com's DNS is managed (the same
+place you set up Workspace email). Google Auth Platform also wants `mannabyte.com`
+verified in <https://search.google.com/search-console>. You may have done that already
+for Workspace.
 
-1. Verify `mannabyte.com` in Google Search Console (you may have done this for
-   Workspace already; Google Auth Platform branding needs it).
-2. When the next session deploys production, it will tell you the exact DNS record for
-   `reports.mannabyte.com` (a CNAME to Cloud Run or Firebase Hosting, depending on which
-   we pick, see [Decisions](#decisions-you-need-to-make)). Adding it takes 5 minutes;
-   certificates take up to a few hours to issue.
-
-### 1.7 IBL production baseline (optional, ≈ 5 min)
+### 1.8 IBL production baseline (optional, ≈ 5 min)
 
 Only if you still want "how long the real Cloud Run job takes" in `docs/benchmarks.md`:
-run `! gcloud auth login` **with the IBL Google account** and the next session will read
-the job history with read-only commands. Not needed for launch.
+run `! gcloud auth login` **with the IBL Google account**, and the session reads the job
+history with read-only commands. Not needed for launch.
+
+### Moving the app to Mannabyte later
+
+When you're ready (before the January launch, or at the latest before you leave IBL in
+May 2027):
+1. Create a Planning Center organization for Mannabyte Labs. Planning Center People is
+   free, but check the sign-up page.
+2. Register a new OAuth app there with the same callback addresses (1.4, steps 3–5).
+3. The session swaps the client ID and secret in Secret Manager.
+4. Each connected church clicks **Sign in with Planning Center** once more. No data is
+   lost.
+
+Planning Center doesn't document a way to transfer an app between organizations, so
+plan on "new app plus one re-sign-in" and don't count on a transfer.
 
 ---
 
 ## Phase 2 — Building what is missing (next sessions)
 
-Once 1.1, 1.2, 1.3 and 1.5 exist. Estimates are in coding sessions like tonight's.
+Once 1.1, 1.2, 1.4 and 1.6 exist. Estimates are in coding sessions like tonight's.
 
 | # | Work | Estimate | Needs from you |
 |---|---|---|---|
 | 2.1 | **Firestore store**: the same four operations as today's JSON store, plus a transaction for "one run at a time" | ½ session | Project from 1.1 |
-| 2.2 | **Google Drive connection**: "Connect Google Drive" button, the app creates an *Advanced Reports* folder in the church's Drive, uploads rosters there each run, replaces last week's files in place | 1 session | Client from 1.5 |
+| 2.2 | **Google Drive connection**: "Connect Google Drive" button, the app creates an *Advanced Reports* folder in the church's Drive, uploads rosters there each run, replaces last week's files in place | 1 session | Client from 1.6 |
 | 2.3 | **IBL Drive delivery that keeps the old folder** (see Phase 3) | ½ session | IBL folder shared with the new service account |
-| 2.4 | **Real Planning Center sign-in**: test against a real org, fix whatever the guesses got wrong, finish "is this person an admin" | ½ session | 1.3, 1.4 answer |
+| 2.4 | **Real Planning Center sign-in**: test against a real org, fix whatever the guesses got wrong, finish "is this person an admin" | ½ session | 1.4 (tested in 1.5) |
 | 2.5 | **Container image and deploy**: one image for the web service and the runner, scripts for staging and production, Cloud Scheduler calling `/internal/dispatch` every 10 minutes | ½–1 session | 1.1, 1.2 |
 | 2.6 | **What happens to PDFs after a run** (see Decisions) | ¼ session | Your decision |
 | 2.7 | **Privacy policy, terms, and a data-deletion page** | ¼ session to draft | Your review (yours to sign off; not legal advice) |
@@ -351,7 +372,7 @@ change.
 | Network egress | Some free egress per month | A few MB of PDFs per church per week to Google Drive | **$0** |
 | Cloud Logging | 50 GiB per project per month | Megabytes | **$0** |
 | Firebase Hosting (only if decision D1 picks it) | 10 GB stored, ~360 MB/day transfer | Under 2 MB of page files | **$0** |
-| Planning Center developer account / test church | Unknown, see 1.3.6 | One test org | **$0 to a small monthly fee**; check |
+| Planning Center developer account / test church | Not needed now (we test with Liberty and IBL) | — | **$0** |
 | Google OAuth verification | Free for `drive.file` | — | **$0** |
 | IBL's old project (until you retire it) | Whatever it costs today | Paused scheduler, no runs | **Drops to about $0** after the switch |
 
@@ -381,7 +402,7 @@ Assuming you can give this a few evenings a week:
 
 | When | What | Your time |
 |---|---|---|
-| Week 1 | Phase 1 accounts (1.1–1.6); email Planning Center | 3–4 h |
+| Week 1 | Phase 1 (1.2–1.6) | about 1 h |
 | Weeks 1–2 | Sessions build 2.1, 2.5, 2.2, 2.4 → staging online | ~30 min per session to answer questions |
 | Week 2 | IBL signs in on production; delivery to a test folder | 30 min |
 | Weeks 3–4 | Two side-by-side Sundays for IBL | 10 min a week |

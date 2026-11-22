@@ -187,7 +187,8 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
             raise HTTPException(403, "Only a Planning Center organization administrator can set this up.")
         repo = repo_for(who["org_id"])
         if not repo.exists():
-            repo.create_church(name=who["org_name"] or "My church", timezone="America/Chicago", language="en")
+            tz = who.get("time_zone") if who.get("time_zone") in available_timezones() else "America/Chicago"
+            repo.create_church(name=who["org_name"] or "My church", timezone=tz, language="en")
         else:
             repo.update_church({"status": "active"})
         repo.save_secret("pco", token, kind="oauth", status="connected", connected_by=who["name"])

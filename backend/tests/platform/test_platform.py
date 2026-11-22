@@ -448,7 +448,7 @@ class FakeHttp:
     def get(self, url, headers=None, timeout=None):
         self.gets.append((url, headers))
         if url.endswith("/people/v2"):
-            return self._R(200, {"data": {"id": "4242", "attributes": {"name": "Test Church"}}})
+            return self._R(200, {"data": {"id": "4242", "attributes": {"name": "Test Church", "time_zone": "America/New_York"}}})
         return self._R(200, {"data": {"id": "77", "attributes": {"name": "Pat Admin", "site_administrator": True}}})
 
 
@@ -469,7 +469,7 @@ class TestPcoOAuth:
 
     def test_who_am_i(self):
         who = pco_oauth.who_am_i("at", FakeHttp())
-        assert who == {"org_id": "4242", "org_name": "Test Church", "person_id": "77",
+        assert who == {"org_id": "4242", "org_name": "Test Church", "time_zone": "America/New_York", "person_id": "77",
                        "name": "Pat Admin", "admin": True}
 
     def test_a_failed_refresh_marks_the_church_for_reconnect(self, settings, store, monkeypatch):

@@ -3,10 +3,10 @@
 # Planning Center OAuth: the sign-in redirect, exchanging the code, refreshing a
 # token, and asking Planning Center who signed in and for which organization.
 #
-# NOT YET RUN AGAINST PLANNING CENTER: no OAuth app is registered. The URLs and
-# field names follow Planning Center's public API documentation as understood
-# when this was written and are covered only by tests against a stand-in. The
-# first real sign-in must be watched (plan §8).
+# First real sign-in: 2026-11-21, locally, against IBL's organization (app
+# "Advanced Reports", owned by IBL for now). Authorize, code exchange, /people/v2,
+# /people/v2/me and the site_administrator admin check all worked as written.
+# Token refresh has not yet been exercised against the real service.
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def refresh(client_id: str, client_secret: str, refresh_token: str, http=request
 
 
 def who_am_i(access_token: str, http=requests) -> dict:
-    """{"org_id", "org_name", "person_id", "name", "admin"} for a fresh token."""
+    """{"org_id", "org_name", "time_zone", "person_id", "name", "admin"} for a fresh token."""
     headers = {"Authorization": f"Bearer {access_token}"}
 
     def get(path: str) -> dict:
@@ -82,8 +82,9 @@ def who_am_i(access_token: str, http=requests) -> dict:
     return {
         "org_id": str(org["id"]),
         "org_name": org.get("attributes", {}).get("name") or "",
+        "time_zone": org.get("attributes", {}).get("time_zone") or "",
         "person_id": str(me["id"]),
         "name": attrs.get("name") or " ".join(filter(None, [attrs.get("first_name"), attrs.get("last_name")])),
-        # Unverified which field marks an organization administrator (plan §8).
+        # Organization administrator. Confirmed on real data 2026-11-21.
         "admin": bool(attrs.get("site_administrator")),
     }

@@ -39,8 +39,8 @@ _Last updated: 2026-11-14 (Saturday, late; session paused mid step 3)_
 | Onboarding meeting with Liberty Baptist Church | ✅ Done. They tried Check-Ins before and it didn't stick (complexity, no training). Clean, professional reports and a short setup are the priority. |
 | Mannabyte Workspace email (`hello@`, `support@`, `admin@`) | ✅ Done per owner (2026-11-14) |
 | Google Cloud organization and billing account | ✅ Exist (owner, 2026-11-14) |
-| Google Cloud staging/production projects | ⬜ Not created |
-| Planning Center Mannabyte account, OAuth app, fake test church | ⬜ None of it exists |
+| Google Cloud staging/production projects | ✅ Both exist with services, Firestore, platform secrets and budget alerts (2026-11-21) |
+| Planning Center OAuth app | ✅ Created under **IBL's** organization (2026-11-21), to move to a Mannabyte org later. Real sign-in tested locally with IBL: code exchange, org lookup and the `site_administrator` admin check all work. Token refresh not yet exercised. New churches now take Planning Center's time zone. |
 | Google OAuth client and consent screen | ⬜ Not started |
 | Working branch | `feat/platform-m1`, branched from `chore/dependency-bumps` at the owner's request (see "Branch" below) |
 | Milestone 1 step 1: golden tests | ✅ Done 2026-11-14 (`backend/tests/golden/`) |
