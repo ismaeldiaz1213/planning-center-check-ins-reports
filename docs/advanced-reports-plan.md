@@ -31,7 +31,7 @@ chats, so this file must stay complete on its own.
 
 ## Status
 
-_Last updated: 2026-11-14 (Saturday, late; session paused mid step 3)_
+_Last updated: 2026-11-22 (staging works end to end; merged to `main` in PR #22). Rows below are newest-first where they say so; older rows are kept for history._
 
 | Item | State |
 |---|---|
@@ -46,15 +46,20 @@ _Last updated: 2026-11-14 (Saturday, late; session paused mid step 3)_
 | Milestone 1 step 1: golden tests | ✅ Done 2026-11-14 (`backend/tests/golden/`) |
 | Milestone 1 step 2: benchmark baseline | 🟡 Local and render baselines recorded in `docs/benchmarks.md`. Production baseline (real `roster-weekly` runs), image size and cold start still missing. |
 | Milestone 1 step 3: engine refactor | ✅ Done 2026-11-14. Verified live: a dry run of the refactored engine produced the same 105 files with identical text to the baseline, in 134 requests. |
-| Milestone 1 step 4: platform core | 🟡 **Runs locally** (`backend/advanced_reports/`). Not built: Firestore store, Google Drive connection, scheduler/dispatch. Planning Center OAuth is written but has never met the real service. See "Steps 4–5" below. |
+| Milestone 1 step 4: platform core | ✅ Done. Firestore store, Cloud Storage files, Google Drive, Cloud Run job runner, scheduler dispatch and real Planning Center OAuth all work on staging (2026-11-22). See `docs/platform.md`. |
 | Milestone 1 step 5: minimal dashboard | 🟡 **Third pass 2026-11-14**: home page, sign-in, and a dashboard with Overview, Rosters, Set up (wizard with live preview), Schedule, Help and Settings. Light/dark, English/Spanish, phone and desktop. Static files served by the API (`advanced_reports/static/`), not the React app. |
-| Milestone 1 steps 6–7 | ⬜ Not started; blocked on the accounts above |
+| Milestone 1 steps 6–7 | 🟡 Staging done; production deploy, domain and IBL's side-by-side run are next (launch guide Phase 2–3) |
 | First end-to-end run on Google Cloud | ✅ 2026-11-22, IBL on staging, signed in with Planning Center OAuth (not the PAT): 209 Planning Center requests, 31 PDFs, 88 s; with Drive connected, 137 s and 31/31 uploaded to Drive. 81 of the 88 s is waiting on sequential Planning Center requests. Next speed-ups: parallel requests, batched Drive uploads, then the sync store. Progress card now shows stages and a first-run estimate. |
 | Launch Phase 2.5: staging deploy | ✅ 2026-11-21. `deploy/platform.sh` + `Dockerfile.platform`. Website and runner are separate Cloud Run resources sharing Firestore and a private bucket (`core/blobs.py`, files encrypted with each church's key, older runs' PDFs deleted after a successful run). Runs start as Cloud Run job executions (`core/cloud_run.py`). Public without `allUsers` via `--no-invoker-iam-check` (the org restricts IAM members to mannabyte.com). First real run on staging not yet done. |
 | Launch Phase 2.1: Firestore store | ✅ Done 2026-11-21. `FirestoreStore` (one JSON string per document), chosen by `AR_FIRESTORE_PROJECT`. Race-free one-run-at-a-time via atomic claim documents (`TenantRepo.start_run`). The same store checks run against memory, files and real staging Firestore. Run outputs and logos are still local files: they need Cloud Storage before the web service and runner can be separate containers (decision D2). |
-| Milestones 2–5 | ⬜ Not started |
+| Milestones 2–5 | ⬜ Not started (dates in §6 have slipped; the launch guide's timeline is the current one) |
 
-**Next action:** the owner works through Phase 1 of [`docs/launch-guide.md`](launch-guide.md) (accounts, secrets, OAuth apps). The next session starts at Phase 2 there: Firestore store and deploy to staging first.
+**Next action (as of 2026-11-22):**
+1. **Owner:** rotate the staging `ar-dispatch-key` (it leaked into tool output; steps in `docs/platform.md` §5).
+2. **Session:** privacy policy, terms and data-deletion pages (launch guide 2.7). The owner reviews them. They unblock publishing the Google app (no more 7-day Drive connections or test-users-only).
+3. **Then:** domain `reports.mannabyte.com`, production deploy (`bash deploy/platform.sh prod`), and IBL's side-by-side Sundays (launch guide Phase 3).
+4. **Watch:** the first run more than 2 hours after a sign-in exercises Planning Center token refresh for real. Check its `usage.pco.token_refreshes`.
+5. **Speed:** parallel Planning Center requests, faster Drive uploads, then the sync store (§3.3).
 
 ### Steps 4–5: platform running locally (2026-11-14)
 
