@@ -30,7 +30,7 @@ from advanced_reports.core.store import Store, open_store
 from advanced_reports.core.tenant_repo import TenantRepo, now_iso
 from advanced_reports.modules import checkin_reports
 from advanced_reports.settings import Settings, from_env
-from planning_center_reports.delivery import slug
+from planning_center_reports.delivery import FanOutDelivery, slug
 from planning_center_reports.services import RunContext, run_report
 
 _LOG_LIMIT = 2000        # lines kept per run
@@ -54,6 +54,7 @@ class _Recorder:
         self._saved_at = 0.0
         self._checked_at = 0.0
         self.report = {"id": "", "label": "", "index": 0, "count": 0}
+        self.drive: int | None = None   # PDFs copied to Google Drive, when connected
 
     # stdout of the engine → the run's log (kept for troubleshooting)
     def write(self, text: str) -> int:
@@ -82,10 +83,15 @@ class _Recorder:
                 eta = elapsed * (1 - fraction) / fraction
             elif self.expected_s:
                 eta = self.expected_s * (1 - fraction)
+        else:  # a first run: estimate from which report and which stage it is on
+            fraction = _first_run_fraction(phase, detail, self.report)
+            if fraction is not None and fraction >= 0.15 and elapsed >= 10:
+                eta = elapsed * (1 - fraction) / fraction
         self.run["progress"] = {
             "phase": phase, "detail": detail, "report": dict(self.report), "steps": self.steps,
             "fraction": round(fraction, 3) if fraction is not None else None,
             "eta_s": round(eta) if eta is not None else None, "elapsed_s": round(elapsed),
+            "drive": self.drive,
         }
         if now - self._saved_at > _SAVE_EVERY_S:
             self.save()
@@ -93,6 +99,23 @@ class _Recorder:
     def save(self) -> None:
         self.repo.save_run(self.run)
         self._saved_at = time.monotonic()
+
+
+# Share of one report's time spent in each stage, measured on IBL's runs:
+# reading check-ins dominates (one Planning Center request per Sunday).
+_STAGE_SPAN = {"event": (0.0, 0.02), "sundays": (0.02, 0.05), "checkins": (0.05, 0.80),
+               "parents": (0.80, 0.88), "saving": (0.88, 1.0)}
+
+
+def _first_run_fraction(phase: str, detail: dict, report: dict) -> float | None:
+    count, index = report.get("count") or 0, report.get("index") or 0
+    if not count or not index or phase not in _STAGE_SPAN:
+        return None
+    start, end = _STAGE_SPAN[phase]
+    within = 0.0
+    if phase == "checkins" and detail.get("of"):
+        within = min(1.0, (detail.get("sunday") or 0) / detail["of"])
+    return round(min(0.97, ((index - 1) + start + (end - start) * within) / count), 3)
 
 
 class _WatchedPco:
@@ -150,6 +173,62 @@ class RunFolderDelivery:
         print(f"  ✓ Saved {'/'.join(folders)}/{filename}", flush=True)
 
 
+class DriveCopy:
+    """Also put each PDF in the church's Google Drive folder, if it connected one.
+
+    Best effort: the rosters are already saved on the platform, so a Drive
+    problem (access revoked, Drive full) is reported once and the run carries on.
+    A refused sign-in marks the connection "needs reconnect" for the dashboard.
+    """
+
+    def __init__(self, repo: TenantRepo, inner, recorder: _Recorder | None = None):
+        self.repo, self.inner, self._rec = repo, inner, recorder
+        self.uploaded, self.error = 0, ""
+        if recorder is not None:
+            recorder.drive = 0
+
+    def deliver(self, path, folders, filename, fingerprint=None) -> None:
+        if self.error:
+            return
+        try:
+            self.inner.deliver(path, folders, filename, fingerprint)
+            self.uploaded += 1
+            if self._rec is not None:
+                self._rec.drive = self.uploaded
+        except RunCancelled:
+            raise
+        except Exception as exc:
+            self.error = _drive_problem(exc)
+            print(f"  ⚠ Google Drive: {self.error} The rosters are still available here.", flush=True)
+            if "reconnect" in self.error:
+                conn = self.repo.connection("google") or {}
+                token = self.repo.secret("google")
+                if token:
+                    self.repo.save_secret("google", token, **{**conn, "status": "needs_reconnect"})
+
+
+def _drive_problem(exc: Exception) -> str:
+    from google.auth.exceptions import RefreshError
+    if isinstance(exc, RefreshError):
+        return "access was removed or expired; please reconnect Google Drive in Settings."
+    status = getattr(getattr(exc, "resp", None), "status", None)
+    if status in (401, 403):
+        return f"Google refused the upload ({status}); please reconnect Google Drive in Settings."
+    return f"the upload failed ({type(exc).__name__})."
+
+
+def _drive_copy(repo: TenantRepo, settings: Settings, recorder: _Recorder | None = None) -> DriveCopy | None:
+    conn = repo.connection("google")
+    if not conn or conn.get("status") != "connected" or not conn.get("folder_id"):
+        return None
+    if not (settings.google_client_id and settings.google_client_secret):
+        return None
+    from advanced_reports.core import google_oauth
+    from planning_center_reports.delivery import DriveOAuthDelivery
+    creds = google_oauth.credentials(repo.secret("google"), settings.google_client_id, settings.google_client_secret)
+    return DriveCopy(repo, DriveOAuthDelivery(conn["folder_id"], creds), recorder)
+
+
 def _last_finished(repo: TenantRepo) -> tuple[int | None, float | None]:
     for run in repo.runs(limit=10):
         steps = (run.get("usage") or {}).get("steps")
@@ -168,7 +247,7 @@ def execute(settings: Settings, store: Store, org_id: str, run_id: str, blobs: B
     recorder = _Recorder(repo, run, *_last_finished(repo))
     recorder.save()
     started = time.perf_counter()
-    ok, cancelled, pco, summary, delivery = False, False, None, [], None
+    ok, cancelled, pco, summary, delivery, drive = False, False, None, [], None, None
     try:
         church = checkin_reports.church_config(
             org_id, repo.church(), repo.module(checkin_reports.MODULE_ID), repo.logo_path())
@@ -177,9 +256,11 @@ def execute(settings: Settings, store: Store, org_id: str, run_id: str, blobs: B
             raise RuntimeError("no reports are set up for this church yet")
         pco = connections.pco_client(repo, settings)
         delivery = RunFolderDelivery(repo, run_id, recorder, church.texts)
+        drive = _drive_copy(repo, settings, recorder)
+        destination = FanOutDelivery([delivery, drive]) if drive else delivery
         failed: list[str] = []
         with contextlib.redirect_stdout(recorder), \
-                RunContext(church, _WatchedPco(pco, recorder), delivery) as ctx:
+                RunContext(church, _WatchedPco(pco, recorder), destination) as ctx:
             for index, spec in enumerate(reports):
                 recorder.report = {"id": spec.id, "label": spec.label, "index": index + 1, "count": len(reports)}
                 print(f"\n{'═' * 60}\n{spec.label}\n{'═' * 60}", flush=True)
@@ -208,6 +289,8 @@ def execute(settings: Settings, store: Store, org_id: str, run_id: str, blobs: B
     run["totals"] = {} if cancelled else {
         "rosters": len(summary), **{k: sum(row[k] for row in summary) for k in ("active", "new", "inactive", "workers")}}
     run["timings"] = {"total_s": round(time.perf_counter() - started, 2)}
+    if drive is not None:
+        run["drive"] = {"uploaded": drive.uploaded, "error": drive.error}
     run["usage"] = {"pco": pco.stats.as_dict() if pco is not None else {}, "steps": recorder.steps,
                     "files": len(outputs), "bytes": sum(o["bytes"] for o in outputs)}
     recorder.save()

@@ -93,6 +93,9 @@ class TenantRepo:
         doc = self._store.get(path)
         return crypto.unseal(self._key(), doc["sealed"], path) if doc else None
 
+    def forget_secret(self, name: str) -> None:
+        self._store.delete_tree(f"{self._root}/connections/{name}")
+
     def connection(self, name: str) -> dict | None:
         """The readable part of a connection (never the secret itself)."""
         doc = self._store.get(f"{self._root}/connections/{name}")

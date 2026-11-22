@@ -229,7 +229,7 @@ Once 1.1, 1.2, 1.4 and 1.6 exist. Estimates are in coding sessions like tonight'
 | # | Work | Estimate | Needs from you |
 |---|---|---|---|
 | 2.1 | **Firestore store**: the same four operations as today's JSON store, plus a transaction for "one run at a time" | ✅ Done 2026-11-21: `core/firestore_store.py`, `AR_FIRESTORE_PROJECT`; store checks pass against real staging Firestore | Project from 1.1 |
-| 2.2 | **Google Drive connection**: "Connect Google Drive" button, the app creates an *Advanced Reports* folder in the church's Drive, uploads rosters there each run, replaces last week's files in place | 1 session | Client from 1.6 |
+| 2.2 | **Google Drive connection** | ✅ Working on staging 2026-11-22: "Connect Google Drive" in Settings → Connections (drive.file only), app-made *Advanced Reports* folder, every run copies its PDFs there (best effort; a Drive failure never fails the run). First real run: 31/31 uploaded. Google app still in *Testing* (7-day connections, test users only) until published. | — |
 | 2.3 | **IBL Drive delivery that keeps the old folder** (see Phase 3) | ½ session | IBL folder shared with the new service account |
 | 2.4 | **Real Planning Center sign-in**: test against a real org, fix whatever the guesses got wrong, finish "is this person an admin" | ½ session | 1.4 (tested in 1.5) |
 | 2.5 | **Container image and deploy** | ✅ Staging live 2026-11-21 at https://advanced-reports-300061322405.us-central1.run.app — `bash deploy/platform.sh staging\|prod` (image built locally, Cloud Run service + job, bucket, scheduler every 10 min). PDFs and logos in Cloud Storage, encrypted per church, latest run only (D2). | — |

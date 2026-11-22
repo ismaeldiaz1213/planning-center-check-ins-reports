@@ -32,7 +32,7 @@ from pydantic import BaseModel
 
 from advanced_reports import demo
 from advanced_reports import dispatch as scheduling
-from advanced_reports.core import connections, pco_oauth, session
+from advanced_reports.core import connections, google_oauth, pco_oauth, session
 from advanced_reports.core.blobs import BlobStore, open_blobs
 from advanced_reports.core.store import Store, open_store
 from advanced_reports.core.tenant_repo import TenantRepo
@@ -48,6 +48,13 @@ from planning_center_reports.reports import HIDEABLE, VALID_THEMES, ReportConfig
 _STATIC = Path(__file__).resolve().parent / "static"
 _BACKEND = Path(__file__).resolve().parent.parent
 _STATE_COOKIE = "ar_oauth_state"
+_GOOGLE_STATE_COOKIE = "ar_google_state"
+
+
+def drive_service(credentials):
+    """A Google Drive client for a church's connection (tests replace this)."""
+    from planning_center_reports.drive_client import get_oauth_drive_service
+    return get_oauth_drive_service(credentials)
 _BRANDING = ("verse_text", "verse_ref", "help_contact", "video_url", "feedback_url")
 
 
@@ -151,6 +158,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
     @app.get("/api/auth/config")
     def auth_config():
         return {"pco_oauth": bool(settings.pco_client_id and settings.pco_client_secret),
+                "google_drive": bool(settings.google_client_id and settings.google_client_secret),
                 "dev_churches": dev_churches()}
 
     @app.post("/auth/dev/login", dependencies=[Depends(changing)])
@@ -204,6 +212,48 @@ def create_app(settings: Settings | None = None, store: Store | None = None,
         redirect.delete_cookie(_STATE_COOKIE)
         sign_in(redirect, repo.org_id, who["person_id"], who["name"])
         return redirect
+
+    # ── Google Drive (the signed-in church connects its own Google account) ──
+    @app.get("/auth/google/login")
+    def google_login(repo: TenantRepo = Depends(church_repo)):
+        if not settings.google_client_id:
+            raise HTTPException(404, "Google Drive is not configured")
+        state = secrets.token_urlsafe(24)
+        redirect = RedirectResponse(google_oauth.authorize_url(settings.google_client_id, settings.base_url, state))
+        redirect.set_cookie(_GOOGLE_STATE_COOKIE, state, max_age=600, httponly=True, samesite="lax",
+                            secure=settings.secure_cookies)
+        return redirect
+
+    @app.get("/auth/google/callback")
+    def google_callback(request: Request, code: str = "", state: str = "", error: str = "",
+                        who: dict = Depends(current), repo: TenantRepo = Depends(church_repo)):
+        if error:  # the admin pressed Cancel on Google's screen
+            return RedirectResponse("/#/app/settings", status_code=303)
+        expected = request.cookies.get(_GOOGLE_STATE_COOKIE, "")
+        if not code or not state or not expected or not secrets.compare_digest(state, expected):
+            raise HTTPException(400, "Google sign-in could not be verified. Please try again.")
+        try:
+            token = google_oauth.exchange_code(settings.google_client_id, settings.google_client_secret,
+                                               settings.base_url, code)
+            account = google_oauth.email(token["access_token"])
+            previous = repo.connection("google") or {}
+            same_account = previous.get("account") == account
+            creds = google_oauth.credentials(token, settings.google_client_id, settings.google_client_secret)
+            folder_id = google_oauth.ensure_folder(drive_service(creds),
+                                                   previous.get("folder_id", "") if same_account else "")
+        except google_oauth.GoogleError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        repo.save_secret("google", token, kind="oauth", status="connected", account=account,
+                         folder_id=folder_id, connected_by=who["name"])
+        redirect = RedirectResponse("/#/app/settings", status_code=303)
+        redirect.delete_cookie(_GOOGLE_STATE_COOKIE)
+        return redirect
+
+    @app.post("/api/google/disconnect", dependencies=[Depends(changing)])
+    def google_disconnect(repo: TenantRepo = Depends(church_repo)):
+        """Forget the Google connection. The Drive folder and its files stay in the church's Drive."""
+        repo.forget_secret("google")
+        return {"ok": True}
 
     @app.post("/auth/logout", dependencies=[Depends(changing)])
     def logout(response: Response):

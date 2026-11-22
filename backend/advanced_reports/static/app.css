@@ -333,6 +333,13 @@ label.field { display: grid; gap: 0.3rem; font-size: 0.82rem; color: var(--muted
 .meter i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--blue)); transition: width 0.6s ease; }
 .meter.unknown i { width: 30%; animation: slide 1.4s ease-in-out infinite; }
 .runcard .now { font-family: var(--display); font-size: 1.15rem; font-weight: 600; margin-top: 0.9rem; }
+.runcard .stages { list-style: none; margin: 0.8rem 0 0; padding: 0; display: grid; gap: 0.35rem; font-size: 0.92rem; }
+.runcard .stages li { display: flex; align-items: center; gap: 0.55rem; color: var(--muted); }
+.runcard .stages li svg { width: 1rem; height: 1rem; color: var(--accent); flex: none; }
+.runcard .stages .dot { width: 0.55rem; height: 0.55rem; margin: 0 0.22rem; border-radius: 999px; background: currentColor; opacity: 0.35; flex: none; }
+.runcard .stages li.active { color: inherit; font-weight: 600; }
+.runcard .stages li.active .dot { background: var(--accent); opacity: 1; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent); }
+.runcard .stages li.done { color: inherit; }
 .runcard .facts-row { display: flex; gap: 0.5rem 1.4rem; flex-wrap: wrap; margin-top: 0.5rem; color: var(--muted); font-size: 0.88rem; }
 .next { display: flex; gap: 0.9rem; align-items: center; }
 .next .when { font-family: var(--display); font-weight: 600; font-size: 1.1rem; }

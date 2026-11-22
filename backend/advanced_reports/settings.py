@@ -10,6 +10,7 @@
 #                          Center OAuth, as one of the built-in dev churches
 #   AR_BASE_URL            public address, used for OAuth redirect URIs
 #   PCO_OAUTH_CLIENT_ID / PCO_OAUTH_CLIENT_SECRET
+#   GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET   "Connect Google Drive"
 #   AR_DISPATCH_KEY        shared secret the scheduler sends to /internal/dispatch
 #   AR_FIRESTORE_PROJECT   keep documents in this Google Cloud project's Firestore
 #                          (unset: one JSON file per document under AR_DATA_DIR)
@@ -44,6 +45,8 @@ class Settings:
     base_url: str = "http://localhost:8000"
     pco_client_id: str = ""
     pco_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
     dispatch_key: str = ""        # shared secret for POST /internal/dispatch; empty turns the route off
     demo_step_s: float = 0.0      # pause per Planning Center call for the sample church, so progress is visible
     firestore_project: str = ""   # empty: FileStore under data_dir
@@ -94,6 +97,8 @@ def from_env(env: dict | None = None) -> Settings:
         base_url=(env.get("AR_BASE_URL") or "http://localhost:8000").rstrip("/"),
         pco_client_id=env.get("PCO_OAUTH_CLIENT_ID", ""),
         pco_client_secret=env.get("PCO_OAUTH_CLIENT_SECRET", ""),
+        google_client_id=env.get("GOOGLE_OAUTH_CLIENT_ID", ""),
+        google_client_secret=env.get("GOOGLE_OAUTH_CLIENT_SECRET", ""),
         dispatch_key=env.get("AR_DISPATCH_KEY", ""),
         demo_step_s=float(env.get("AR_DEMO_STEP_SECONDS") or (0.2 if dev else 0)),
         firestore_project=env.get("AR_FIRESTORE_PROJECT", "").strip(),

@@ -4,8 +4,10 @@ Planning Center Check-Ins tooling for Iglesia Bautista Libertad (IBL, Houston), 
 into **Advanced Reports for Planning Center**, a multi-church hosted platform.
 
 ## Where to start
-- Platform work: read `docs/advanced-reports-plan.md` (§0 "Start here" and its Status
-  section), then `docs/launch-guide.md`.
+- Platform work: read `docs/platform.md` first (what runs where, code map, running,
+  deploying, operating, known gaps), then `docs/advanced-reports-plan.md` (decisions and the
+  Status section, which you update as work lands) and `docs/launch-guide.md` (the owner's
+  checklist; keep its status table current).
 - Bulk check-ins / pre-select (roster spreadsheets, grade promotion, IBL bus classes):
   read `docs/check-in-tools.md`. It covers which script to use, setup per church,
   the safety rules, and how to read the match report.
@@ -38,3 +40,14 @@ into **Advanced Reports for Planning Center**, a multi-church hosted platform.
 - Local platform: `cd backend && AR_DEV_LOGIN=1 .venv/bin/uvicorn advanced_reports.app:create_app --factory --port 8000`.
 - The Planning Center MCP connector is read-only and connected to one church at a time.
   Check which one with `people_current_organization`.
+
+## Working with the owner
+- They want to **see things working**, step by step. Give exact, click-level instructions
+  (which page, which button, what text to paste) and say what they should see next.
+- In auto mode, creating or changing cloud resources is blocked for Claude. Prepare the command
+  (and a `DRY_RUN=1` preview where the script supports it) and ask the owner to run it with `!`.
+- Screenshots for docs or posts: use the local demo's made-up church only, never staging or
+  production (they show real children's names and parents' phone numbers). Rename the demo
+  church in Settings first; its default name is a real church.
+- The repo is public. Before pushing, check the commits for real people's names, phone numbers,
+  emails and secrets.

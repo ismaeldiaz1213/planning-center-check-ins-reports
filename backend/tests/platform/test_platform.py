@@ -357,7 +357,7 @@ class TestSignIn:
         off = Settings(data_dir=settings.data_dir, master_key_b64=settings.master_key_b64,
                        session_secret="s", dev_login=False)
         client = TestClient(create_app(off, store, launcher))
-        assert client.get("/api/auth/config").json() == {"pco_oauth": False, "dev_churches": []}
+        assert client.get("/api/auth/config").json() == {"pco_oauth": False, "google_drive": False, "dev_churches": []}
         assert client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF).status_code == 404
         assert client.get("/auth/pco/login").status_code == 404
 
@@ -496,6 +496,16 @@ class TestRuns:
                                   {"overrides": {"containerOverrides": [{"args": ["100", "run-1"]}], "taskCount": 1}})]
         with pytest.raises(ValueError):
             CloudRunJobLauncher("advanced-reports-runner")
+
+    def test_a_first_run_still_shows_how_far_along_it_is(self):
+        from advanced_reports.runner import _first_run_fraction
+        report = {"index": 1, "count": 2}
+        early = _first_run_fraction("checkins", {"sunday": 1, "of": 10}, report)
+        late = _first_run_fraction("checkins", {"sunday": 10, "of": 10}, report)
+        saving = _first_run_fraction("saving", {}, report)
+        second = _first_run_fraction("event", {}, {"index": 2, "count": 2})
+        assert 0 < early < late < saving < second <= 0.97
+        assert _first_run_fraction("checkins", {}, {"index": 0, "count": 0}) is None
 
     def test_the_log_never_shows_server_paths(self, app, settings):
         client = TestClient(app)
@@ -654,6 +664,124 @@ class TestPcoOAuth:
         assert client.auth.request_kwargs() == {"headers": {"Authorization": "Bearer new-access"}}
         assert r.secret("pco")["refresh_token"] == "new-refresh"
         assert "new-access" not in str(store.docs)
+
+
+class FakeDrive:
+    """Enough of the Drive v3 client for connecting and uploading."""
+
+    def __init__(self, existing=None):
+        self.created, self.existing = [], existing or {}
+
+    def files(self):
+        return self
+
+    def get(self, fileId, fields=None):
+        found = self.existing.get(fileId)
+        if found is None:
+            raise RuntimeError("404")
+        return type("Q", (), {"execute": lambda _self: found})()
+
+    def create(self, body=None, fields=None, **_):
+        self.created.append(body)
+        return type("Q", (), {"execute": lambda _self: {"id": f"folder-{len(self.created)}"}})()
+
+
+@pytest.fixture
+def google_app(settings, store, launcher, monkeypatch):
+    from dataclasses import replace
+
+    from advanced_reports import app as app_module
+    from advanced_reports.core import google_oauth
+    s = replace(settings, google_client_id="gcid", google_client_secret="gsec")
+    drive = FakeDrive()
+    monkeypatch.setattr(google_oauth, "exchange_code", lambda *_a, **_k: {
+        "kind": "oauth", "access_token": "g-at", "refresh_token": "g-rt", "expires_at": 1})
+    monkeypatch.setattr(google_oauth, "email", lambda _token: "office@church.example")
+    monkeypatch.setattr(app_module, "drive_service", lambda _creds: drive)
+    client = TestClient(create_app(s, store, launcher))
+    client.post("/auth/dev/login", json={"church": "demo"}, headers=CSRF)
+    return client, drive, s
+
+
+def connect_google(client):
+    start = client.get("/auth/google/login", follow_redirects=False)
+    assert start.status_code == 307 and "drive.file" in start.headers["location"]
+    state = start.headers["location"].split("state=")[1].split("&")[0]
+    return client.get(f"/auth/google/callback?code=c&state={state}", follow_redirects=False)
+
+
+class TestGoogleDrive:
+    def test_connect_creates_one_folder_and_keeps_the_token_sealed(self, google_app, store):
+        client, drive, _ = google_app
+        done = connect_google(client)
+        assert done.status_code == 303 and done.headers["location"] == "/#/app/settings"
+        assert drive.created == [{"name": "Advanced Reports", "mimeType": "application/vnd.google-apps.folder"}]
+        conn = client.get("/api/me").json()["connections"]["google"]
+        assert conn["account"] == "office@church.example" and conn["folder_id"] == "folder-1"
+        assert conn["status"] == "connected" and "sealed" not in conn
+        assert "g-rt" not in str(store.docs)
+
+    def test_reconnecting_the_same_account_reuses_its_folder(self, google_app):
+        client, drive, _ = google_app
+        connect_google(client)
+        drive.existing["folder-1"] = {"id": "folder-1", "trashed": False}
+        connect_google(client)
+        assert len(drive.created) == 1
+        assert client.get("/api/me").json()["connections"]["google"]["folder_id"] == "folder-1"
+
+    def test_a_forged_callback_is_refused(self, google_app):
+        client, _, _ = google_app
+        client.get("/auth/google/login", follow_redirects=False)
+        assert client.get("/auth/google/callback?code=c&state=forged").status_code == 400
+
+    def test_disconnect_forgets_the_account(self, google_app):
+        client, _, _ = google_app
+        connect_google(client)
+        assert client.post("/api/google/disconnect", headers=CSRF).json() == {"ok": True}
+        assert client.get("/api/me").json()["connections"]["google"] is None
+
+    def test_runs_copy_every_pdf_to_drive(self, google_app, store, monkeypatch):
+        import planning_center_reports.delivery as delivery_module
+        client, _, s = google_app
+        uploads = []
+
+        class Recording:
+            def __init__(self, folder_id, credentials):
+                self.folder_id = folder_id
+
+            def deliver(self, path, folders, filename, fingerprint=None):
+                uploads.append((self.folder_id, "/".join(folders), filename))
+        monkeypatch.setattr(delivery_module, "DriveOAuthDelivery", Recording)
+        connect_google(client)
+        run = runner_execute(s, store)
+        assert run["status"] == "succeeded" and run["drive"] == {"uploaded": 12, "error": ""}
+        assert ("folder-1", "Sunday School/Nursery", "Roster.pdf") in uploads
+
+    def test_a_drive_failure_does_not_fail_the_run(self, google_app, store, monkeypatch):
+        from google.auth.exceptions import RefreshError
+
+        import planning_center_reports.delivery as delivery_module
+        client, _, s = google_app
+
+        class Revoked:
+            def __init__(self, *_a):
+                pass
+
+            def deliver(self, *_a, **_k):
+                raise RefreshError("invalid_grant")
+        monkeypatch.setattr(delivery_module, "DriveOAuthDelivery", Revoked)
+        connect_google(client)
+        run = runner_execute(s, store)
+        assert run["status"] == "succeeded" and run["usage"]["files"] == 12
+        assert "reconnect" in run["drive"]["error"]
+        assert client.get("/api/me").json()["connections"]["google"]["status"] == "needs_reconnect"
+
+
+def runner_execute(settings, store):
+    r = TenantRepo(store, settings.vault, settings.files_dir, demo.ORG_ID)
+    run = r.start_run("manual")
+    runner.execute(settings, store, demo.ORG_ID, run["id"])
+    return r.run(run["id"])
 
 
 class TestStatsAndGuides:

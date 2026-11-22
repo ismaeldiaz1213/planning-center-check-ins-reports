@@ -4,6 +4,8 @@
 #   bash deploy/platform.sh staging     # mannabyte-reports-staging
 #   bash deploy/platform.sh prod        # mannabyte-reports-prod
 #   DRY_RUN=1 bash deploy/platform.sh staging   # print what would run, change nothing
+#   GOOGLE_CLIENT_JSON=~/Downloads/client_secret_….json bash deploy/platform.sh staging
+#       also stores the Google Drive client (once; later deploys reuse the secrets)
 #
 # Safe to run again: every step creates what is missing and updates the rest.
 # Run it signed in to gcloud as the Mannabyte account (ismael@mannabyte.com),
@@ -110,7 +112,23 @@ for pair in pco-oauth-client-id:PCO_OAUTH_CLIENT_ID pco-oauth-client-secret:PCO_
     fi
   fi
 done
+# Google Drive client (optional): from the JSON file Google gave you, if the secrets don't exist yet.
+if ! exists gcloud secrets describe google-oauth-client-id --project="$PROJECT" && [[ -n "${GOOGLE_CLIENT_JSON:-}" ]]; then
+  [[ -f "$GOOGLE_CLIENT_JSON" ]] || { echo "GOOGLE_CLIENT_JSON: no file at $GOOGLE_CLIENT_JSON" >&2; exit 1; }
+  for field in client_id:google-oauth-client-id client_secret:google-oauth-client-secret; do
+    key="${field%%:*}"; name="${field#*:}"
+    if [[ "${DRY_RUN:-}" == 1 ]]; then echo "  [dry-run] create secret $name from the Google JSON file"; else
+      python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["web"][sys.argv[2]], end="")' \
+        "$GOOGLE_CLIENT_JSON" "$key" | gcloud secrets create "$name" --data-file=- --project="$PROJECT" >/dev/null
+      echo "  created $name"
+    fi
+  done
+fi
+GOOGLE=0
+exists gcloud secrets describe google-oauth-client-id --project="$PROJECT" && GOOGLE=1
 SECRETS=(ar-master-key ar-session-secret ar-dispatch-key pco-oauth-client-id pco-oauth-client-secret)
+[[ "$GOOGLE" == 1 ]] && SECRETS+=(google-oauth-client-id google-oauth-client-secret)
+[[ "$GOOGLE" == 1 ]] || echo "  (no Google Drive client stored: deploying without \"Connect Google Drive\")"
 for name in "${SECRETS[@]}"; do
   exists gcloud secrets describe "$name" --project="$PROJECT" || [[ "${DRY_RUN:-}" == 1 ]] \
     || { echo "Secret $name is missing in $PROJECT (see docs/launch-guide.md 1.2)" >&2; exit 1; }
@@ -128,13 +146,15 @@ ENV_VARS+=",AR_RUNNER_JOB=projects/$PROJECT/locations/$REGION/jobs/$JOB"
 SECRET_VARS="AR_MASTER_KEY=ar-master-key:latest,AR_SESSION_SECRET=ar-session-secret:latest"
 SECRET_VARS+=",AR_DISPATCH_KEY=ar-dispatch-key:latest"
 SECRET_VARS+=",PCO_OAUTH_CLIENT_ID=pco-oauth-client-id:latest,PCO_OAUTH_CLIENT_SECRET=pco-oauth-client-secret:latest"
+[[ "$GOOGLE" == 1 ]] && SECRET_VARS+=",GOOGLE_OAUTH_CLIENT_ID=google-oauth-client-id:latest,GOOGLE_OAUTH_CLIENT_SECRET=google-oauth-client-secret:latest"
 
 step "Runner (Cloud Run job)"
 run gcloud run jobs deploy "$JOB" --project="$PROJECT" --region="$REGION" --image="$IMAGE" \
-  --service-account="$SA" --command=python --args=-m,advanced_reports.runner \
+  --service-account="$SA" --command=python,-m,advanced_reports.runner --args="" \
   --set-env-vars="$ENV_VARS" --set-secrets="$SECRET_VARS" \
   --tasks=1 --max-retries=0 --task-timeout=30m --cpu=1 --memory=1Gi --quiet
-# The website starts executions with per-run arguments.
+# The website starts executions with per-run arguments <org_id> <run_id>. They
+# replace the job's args, so the whole command lives in --command and args stay empty.
 run gcloud run jobs add-iam-policy-binding "$JOB" --project="$PROJECT" --region="$REGION" \
   --member="serviceAccount:$SA" --role=roles/run.developer --quiet >/dev/null
 

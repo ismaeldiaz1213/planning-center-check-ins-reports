@@ -134,6 +134,24 @@
   }
   const isDone = (run) => !["queued", "running"].includes(run.status);
   const activeRun = () => state.runs.find((run) => !isDone(run));
+  // Google Drive: { pill, text, actions } for the connection, shared by Overview and Settings.
+  function googleStatus() {
+    const g = state.me.connections.google, can = state.config?.google_drive;
+    if (!can && !g) return { pill: h("span", { class: "pill", text: t("coming") }), text: t("c_google_body"), actions: null };
+    const ok = g && g.status === "connected";
+    const pill = h("span", { class: `pill ${ok ? "ok" : "bad"}`, text: t(ok ? "connected" : g ? "needs_attention" : "not_connected") });
+    const text = ok ? t("c_google_on", g.account) : g ? t("c_google_bad", g.account) : t("c_google_off");
+    const disconnect = async () => {
+      if (!window.confirm(t("c_google_confirm"))) return;
+      await api("/api/google/disconnect", { method: "POST" });
+      state.me = await api("/api/me"); render();
+    };
+    const actions = h("div", { class: "row", style: "gap:.5rem;margin-top:.6rem;flex-wrap:wrap" },
+      ok ? h("a", { class: "btn secondary", href: `https://drive.google.com/drive/folders/${encodeURIComponent(g.folder_id)}`, target: "_blank", rel: "noopener" }, icon("open"), t("c_google_open"))
+        : h("a", { class: "btn primary", href: "/auth/google/login" }, icon("folder"), t(g ? "c_google_reconnect" : "c_google_connect")),
+      g ? h("button", { class: "btn ghost", type: "button", onclick: disconnect, text: t("c_google_disconnect") }) : null);
+    return { pill, text, actions };
+  }
   const goodRuns = () => state.runs.filter((run) => run.status === "succeeded" && run.files > 0);
   async function detail(runId) {
     if (!state.details[runId] || !isDone(state.details[runId])) state.details[runId] = await api(`/api/runs/${encodeURIComponent(runId)}`);
@@ -362,6 +380,17 @@
     if (progress.phase === "saving") return d.kind === "volunteers" ? t("ph_volunteers") : t("ph_roster", d.location);
     return t("ph_other");
   }
+  // The stages of one report, ticked off as the run moves through them.
+  function stageList(p) {
+    const at = !p ? -1 : ({ event: 0, sundays: 0, checkins: 0, parents: 1, saving: 2 })[p.phase] ?? 0;
+    const items = [["st_read", 0], ["st_people", 1], ["st_pdfs", 2]];
+    const withDrive = p && p.drive !== null && p.drive !== undefined;
+    const row = (label, state) => h("li", { class: state },
+      state === "done" ? icon("check") : h("span", { class: "dot" }), h("span", { text: label }));
+    return h("ol", { class: "stages" },
+      ...items.map(([key, index]) => row(t(key), index < at ? "done" : index === at ? "active" : "todo")),
+      withDrive ? row(t("st_drive", p.drive), at === 2 ? "active" : "todo") : null);
+  }
   function progressCard(run) {
     const p = run.progress;
     const known = p && p.fraction !== null && p.fraction !== undefined;
@@ -374,6 +403,7 @@
       h("div", { class: `meter ${known ? "" : "unknown"}`, role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": percent === null ? null : String(percent) },
         h("i", { style: known ? `width:${Math.max(3, percent)}%` : "" })),
       h("p", { class: "now", text: run.cancelling ? t("cancel_sent") : phaseText(p) }),
+      stageList(p),
       h("div", { class: "facts-row" },
         p && p.report && p.report.count ? h("span", { text: t("report_of", p.report.index, p.report.count, p.report.label) }) : null,
         percent !== null ? h("span", { class: "num", text: t("percent", percent) }) : null,
@@ -448,7 +478,7 @@
             h("a", { href: "#/app/help" }, icon("help"), t("q_help")))),
           h("div", { class: "card" }, h("div", { class: "card-head" }, h("h3", { text: t("connections") })),
             h("dl", { class: "kv" }, h("dt", { text: "Planning Center" }), h("dd", {}, h("span", { class: `pill ${pco ? "ok" : "bad"}`, text: t(pco ? "connected" : "not_connected") })),
-              h("dt", { text: "Google Drive" }), h("dd", {}, h("span", { class: "pill", text: t("coming") })))))));
+              h("dt", { text: "Google Drive" }), h("dd", {}, googleStatus().pill))))));
   }
 
   // ── Rosters ─────────────────────────────────────────────────────────────────
@@ -794,8 +824,9 @@
         h("div", { class: "conn" }, h("span", { class: "badge blue" }, icon("people")), h("div", { class: "grow" }, h("div", { class: "row" }, h("b", { class: "grow", text: "Planning Center" }),
           h("span", { class: `pill ${pco ? "ok" : "bad"}`, text: t(pco ? "connected" : "not_connected") })),
           h("p", { class: "muted small", style: "margin-top:.3rem", text: pco ? t("c_pco_" + pco.kind) : "" }))),
-        h("div", { class: "conn" }, h("span", { class: "badge gold" }, icon("folder")), h("div", { class: "grow" }, h("div", { class: "row" }, h("b", { class: "grow", text: t("c_google") }),
-          h("span", { class: "pill", text: t("coming") })), h("p", { class: "muted small", style: "margin-top:.3rem", text: t("c_google_body") }))));
+        (() => { const g = googleStatus();
+          return h("div", { class: "conn" }, h("span", { class: "badge gold" }, icon("folder")), h("div", { class: "grow" }, h("div", { class: "row" }, h("b", { class: "grow", text: t("c_google") }), g.pill),
+            h("p", { class: "muted small", style: "margin-top:.3rem", text: g.text }), g.actions)); })());
     } else {
       panel = h("div", { class: "card form" }, h("div", {}, h("h3", { text: t("d_title") }), h("p", { class: "muted", style: "margin-top:.3rem", text: t("d_body") })),
         h("div", {}, h("button", { class: "btn danger", type: "button", onclick: async () => {

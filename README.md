@@ -1,8 +1,101 @@
-# Planning Center Check-Ins — Roster System
+# Planning Center Check-Ins — Roster System → Advanced Reports for Planning Center
 
-Automatically generates PDF rosters from [Planning Center](https://www.planningcenter.com/) check-ins and uploads them to Google Drive on a weekly schedule. Originally built for a church bus ministry; configurable for any church using Planning Center Check-Ins.
+Automatically generates PDF rosters from [Planning Center](https://www.planningcenter.com/) check-ins
+and delivers them every week. It started as a single-church tool for a bus ministry (still running
+in production, documented further down) and is becoming **Advanced Reports for Planning Center**: a
+hosted, multi-church platform where a church signs in with Planning Center, picks its events, and
+gets clean rosters in its own Google Drive, with no setup on anyone's laptop.
 
 ---
+
+## Advanced Reports (the platform)
+
+![The dashboard after a run: who's on the lists, who's new, who hasn't been back, by class](docs/images/overview.jpg)
+
+**Status (November 2026):** working end to end on Google Cloud staging. A church admin signs in
+with Planning Center (OAuth, no API keys), sets up rosters in a wizard, presses *Make rosters
+now* (or sets a weekly schedule), and the PDFs appear in the dashboard and in an *Advanced
+Reports* folder in the church's own Google Drive. The first real run made 31 rosters for a church
+of ~500 children in 88 seconds.
+
+| | |
+|---|---|
+| ![Live progress with stages and a time estimate](docs/images/run-progress.jpg) | ![Rosters tab with the PDF viewer](docs/images/rosters.jpg) |
+| **Live progress.** Stages, a percentage and time left, even on a church's first run. Runs keep going if you close the page, and can be cancelled. | **Rosters.** Every class and bus route, ready to open, print or download. |
+| ![The roster wizard with a live preview](docs/images/setup-wizard.jpg) | ![Connections: Planning Center and Google Drive](docs/images/connections.png) |
+| **Set up in minutes.** Pick a Check-Ins event, tick what each roster shows, see a live preview with sample people. | **Your Drive, your data.** Connect Google Drive with the narrowest permission Google offers: the app only sees files it creates. |
+
+![A roster PDF (sample data)](docs/images/roster-pdf.png)
+
+*A roster: attendance dots, new-this-Sunday stars, a parent line under each child, teachers and
+helpers, a "haven't been back" call list, and yellow highlights where information is missing.
+All screenshots use made-up sample people.*
+
+The dashboard is bilingual (English/Spanish) with light and dark themes, and works on a phone:
+
+![Spanish, light theme](docs/images/overview-es-light.jpg)
+
+### How it works
+
+```mermaid
+flowchart LR
+  admin([Church admin]) -- "Sign in with Planning Center" --> web
+  sched[Cloud Scheduler<br/>every 10 min] -- due weekly runs --> web
+  subgraph gcp [Google Cloud]
+    web[Cloud Run service<br/>dashboard + API]
+    job[Cloud Run job<br/>one execution = one church's run]
+    fs[(Firestore<br/>settings, runs, sealed tokens)]
+    gcs[(Cloud Storage<br/>latest run's PDFs, encrypted)]
+    sm[Secret Manager]
+    web -- start run --> job
+    web <--> fs
+    job <--> fs
+    job --> gcs
+    web --> gcs
+    sm -.-> web
+    sm -.-> job
+  end
+  job -- read check-ins and people --> pco[(Planning Center API)]
+  job -- copy PDFs --> drive[(The church's Google Drive)]
+```
+
+- **One run = one church.** Each run is its own Cloud Run job execution that loads only that
+  church's settings and keys. Every storage path starts with `churches/{org_id}`, and tests prove
+  two churches can't read, list, run or download each other's data.
+- **Encrypted per church.** Each church has its own data key (AES-GCM), wrapped by a master key in
+  Secret Manager. Planning Center and Google tokens and every stored PDF are sealed with it.
+  Only the latest run's PDFs are kept.
+- **Fast and light on Planning Center.** Person details come with the check-ins and parents are a
+  batched lookup, so a weekly run is ~200 requests instead of thousands (the first version
+  spent ~40 minutes of job time a week; a run now takes about a minute and a half).
+- **Free-tier first.** Firestore, Cloud Run with zero idle instances, one scheduler job and a small
+  bucket. One deploy script sets it all up: `bash deploy/platform.sh staging|prod`.
+- **Read-only.** The platform never changes anything in Planning Center.
+
+Code: `backend/advanced_reports/` (platform), `backend/planning_center_reports/` (the report
+engine, shared with the original tool). Start with [`CLAUDE.md`](CLAUDE.md) and
+[`docs/advanced-reports-plan.md`](docs/advanced-reports-plan.md).
+
+### Roadmap
+
+| When | What |
+|---|---|
+| ✅ Nov 2026 | Multi-church engine, platform core, dashboard, Planning Center sign-in, Firestore, Cloud Storage, Cloud Run deploy, Google Drive delivery, live progress |
+| Next | Privacy policy and terms; custom domain; publish the Google app; production deploy; IBL runs side by side with the old job, then switches |
+| Dec 2026 | Faster runs (parallel requests, then a synced data store so a run only fetches the newest week); onboard a second church |
+| Then | **Bus/Van Route Builder**, **Grade Promotion Helper** (audit report first), **Google Sheets sync** |
+| Jan 2027 | Public launch: setup guide and video, Planning Center community and integrations directory |
+
+The full plan, decisions and status live in [`docs/advanced-reports-plan.md`](docs/advanced-reports-plan.md);
+the step-by-step launch checklist is [`docs/launch-guide.md`](docs/launch-guide.md).
+
+---
+
+## The original roster tool (single church, in production)
+
+Everything below documents the original setup: one church, configured by `.env` and
+`reports.yaml`, running as a weekly Cloud Run job, with a React/FastAPI admin UI. It keeps running
+unchanged until that church moves to the platform.
 
 ## Live Demo
 
@@ -133,6 +226,10 @@ python main.py rutas --theme invierno
 - [Deploying to Google Cloud](docs/deployment-gcp.md) — Cloud Run jobs, manage.sh, web UI deploy
 - [Grade Promotion](docs/grade-promotion.md) — moving a class up a grade in Check-Ins pre-select history
 - [Sample Data & Previews](docs/sample-data.md) — preview.py flags and mock data editing
+- [Check-In Tools](docs/check-in-tools.md) — seeding pre-select history from a roster spreadsheet, grade promotion, bus classes
+- **Platform:** [Platform guide](docs/platform.md) (code map, running, deploying, operating) ·
+  [Plan and status](docs/advanced-reports-plan.md) · [Launch guide](docs/launch-guide.md) ·
+  [Benchmarks](docs/benchmarks.md)
 
 For development workflow (running the test suite, Vite dev server, full-stack local setup),
 see [DEVELOPMENT.md](DEVELOPMENT.md).
